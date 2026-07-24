@@ -1,0 +1,27 @@
+# Configurações e Arquivos Sensíveis
+config/
+.env
+login-headers.txt
+
+# API e Integrações
+api/
+includes/mercadopago.php
+includes/whatsapp.php
+
+# Banco de Dados
+sql/
+
+# Uploads e Dados do Sistema
+uploads/
+data/
+!uploads/.htaccess
+!uploads/.gitkeep
+!data/.htaccess
+!data/.gitkeep
+
+# Arquivos de Sistema / Outros
+.DS_Store
+Thumbs.db
+.next/
+node_modules/
+/scratch/

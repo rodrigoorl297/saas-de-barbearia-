@@ -1,0 +1,44 @@
+RewriteEngine On
+
+
+
+# Bloqueia acesso direto a dados e logs
+
+RewriteRule ^data/ - [F,L]
+
+RewriteRule ^scratch/ - [F,L]
+
+RewriteRule \.env$ - [F,L]
+
+
+
+# Se a pasta/arquivo existir, serve normalmente
+
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+
+RewriteCond %{REQUEST_FILENAME} -d
+
+RewriteRule ^ - [L]
+
+
+
+# Paths inexistentes (ex.: /{slug}/...) → front controller
+
+RewriteRule ^ router.php [L]
+
+
+
+# Cabeçalhos de segurança (quando o módulo estiver disponível)
+
+<IfModule mod_headers.c>
+
+  Header always set X-Frame-Options "SAMEORIGIN"
+
+  Header always set X-Content-Type-Options "nosniff"
+
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+  Header always set X-XSS-Protection "1; mode=block"
+
+</IfModule>
+
