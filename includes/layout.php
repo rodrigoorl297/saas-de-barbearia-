@@ -11,6 +11,8 @@ function render_head(string $title, bool $client = false, ?string $bodyClass = n
     }
     $logoHref = $logo !== '' ? media_url($logo) : media_url(product_logo_path());
     $body = $bodyClass ?? ($client ? 'is-client' : 'is-admin');
+    $cssFile = dirname(__DIR__) . '/assets/css/app.css';
+    $cssVer = is_file($cssFile) ? (string) filemtime($cssFile) : (string) time();
     ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -23,13 +25,37 @@ function render_head(string $title, bool $client = false, ?string $bodyClass = n
   <link rel="apple-touch-icon" href="<?= e($logoHref) ?>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <?php if (!$client && $body !== 'is-barber'): ?>
+  <?php if (!$client): ?>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <?php endif; ?>
-  <link href="<?= e(url('assets/css/app.css')) ?>" rel="stylesheet">
+  <link href="<?= e(url('assets/css/app.css')) ?>?v=<?= e($cssVer) ?>" rel="stylesheet">
+  <?php if ($body === 'is-barber'): ?>
+  <style>
+    body.is-barber{background:#0b0d12!important;color:#e8eaf0;font-family:"League Spartan",system-ui,sans-serif;margin:0}
+    .bb-app{max-width:480px;margin:0 auto;min-height:100vh;padding-bottom:88px}
+    .bb-top img{width:42px!important;height:42px!important;border-radius:50%;object-fit:cover;display:block}
+    .bb-nav{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:min(100%,480px);z-index:50;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));background:rgba(16,19,26,.96);border-top:1px solid rgba(255,255,255,.08)}
+    .bb-nav-item{display:grid;justify-items:center;gap:2px;text-decoration:none;color:#9aa3b5;font-size:.72rem;font-weight:600;padding:8px 4px;border-radius:12px}
+    .bb-nav-item.active{color:#c9a227;background:rgba(201,162,39,.1)}
+    .bb-nav-ico,.bb-nav-svg{display:block;width:24px;height:24px}
+  </style>
+  <?php endif; ?>
 </head>
 <body class="<?= e($body) ?>">
 <?php
+}
+
+function render_scripts(bool $client = false, bool $barber = false): void
+{
+    echo '<script>window.__CSRF__=' . json_encode(csrf_token(), JSON_UNESCAPED_SLASHES) . ';</script>';
+    echo '<script src="' . e(url('assets/js/csrf.js')) . '"></script>';
+    if (!$client) {
+        echo '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>';
+        if (!$barber) {
+            echo '<script src="' . e(url('assets/js/admin.js')) . '"></script>';
+        }
+    }
+    echo '</body></html>';
 }
 
 function render_flash_client(): void
@@ -47,17 +73,6 @@ function render_flash(): void
     echo '<div class="alert alert-' . e($flash['type']) . ' alert-dismissible fade show m-3" role="alert">'
         . e($flash['message'])
         . '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
-}
-
-function render_scripts(bool $client = false): void
-{
-    echo '<script>window.__CSRF__=' . json_encode(csrf_token(), JSON_UNESCAPED_SLASHES) . ';</script>';
-    echo '<script src="' . e(url('assets/js/csrf.js')) . '"></script>';
-    if (!$client) {
-        echo '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>';
-        echo '<script src="' . e(url('assets/js/admin.js')) . '"></script>';
-    }
-    echo '</body></html>';
 }
 
 function client_shell_start(string $active = 'agendar'): void
@@ -239,7 +254,7 @@ function admin_layout_end(): void
     render_scripts(false);
 }
 
-/** Shell mobile do barbeiro — sem sidebar do dono. */
+/** Shell mobile do barbeiro. */
 function barber_shell_start(string $title, string $active = 'hoje'): void
 {
     $user = current_user();
@@ -248,7 +263,7 @@ function barber_shell_start(string $title, string $active = 'hoje'): void
 <div class="bb-app">
   <header class="bb-top">
     <div class="bb-top-brand">
-      <img src="<?= e(media_url(product_logo_path())) ?>" alt="">
+      <img src="<?= e(media_url(product_logo_path())) ?>" alt="" width="40" height="40">
       <div>
         <strong><?= e(str_upper(product_name())) ?></strong>
         <span><?= e($user['name'] ?? 'Barbeiro') ?></span>
@@ -259,28 +274,44 @@ function barber_shell_start(string $title, string $active = 'hoje'): void
   <?php
     $flash = get_flash();
     if ($flash):
-        $cls = ($flash['type'] ?? '') === 'danger' ? 'bb-flash--bad' : (($flash['type'] ?? '') === 'warning' ? 'bb-flash--warn' : 'bb-flash--ok');
+      $cls = match ($flash['type'] ?? '') {
+          'danger' => 'bb-flash--bad',
+          'warning' => 'bb-flash--warn',
+          default => 'bb-flash--ok',
+      };
   ?>
     <div class="bb-flash <?= e($cls) ?>"><?= e($flash['message']) ?></div>
   <?php endif; ?>
   <main class="bb-main">
-    <h1 class="bb-title"><?= e($title) ?></h1>
+    <?php if (trim($title) !== ''): ?>
+      <h1 class="bb-title"><?= e($title) ?></h1>
+    <?php endif; ?>
 <?php
 }
 
 function barber_shell_end(string $active = 'hoje'): void
 {
-    $items = [
-        'hoje' => ['barbeiro/', 'Hoje', '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>'],
-        'produtos' => ['barbeiro/produtos.php', 'Produtos', '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16l-1.2 12.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>'],
-        'conta' => ['barbeiro/perfil.php', 'Conta', '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>'],
+    $icons = [
+        'hoje' => '<svg class="bb-nav-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+        'clientes' => '<svg class="bb-nav-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+        'produtos' => '<svg class="bb-nav-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 6h18" stroke="currentColor" stroke-width="2"/><path d="M16 10a4 4 0 0 1-8 0" stroke="currentColor" stroke-width="2"/></svg>',
+        'conta' => '<svg class="bb-nav-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2"/></svg>',
     ];
-    echo '</main><nav class="bb-nav" aria-label="Menu barbeiro">';
-    foreach ($items as $key => [$href, $label, $svg]) {
-        $cls = $active === $key ? 'bb-nav-item active' : 'bb-nav-item';
-        echo '<a class="' . $cls . '" href="' . e(url($href)) . '"><span class="bb-nav-ico">' . $svg . '</span><span>' . e($label) . '</span></a>';
+    $items = [
+        'hoje' => ['barbeiro/', 'Hoje'],
+        'clientes' => ['barbeiro/clientes.php', 'Clientes'],
+        'produtos' => ['barbeiro/produtos.php', 'Produtos'],
+        'conta' => ['barbeiro/perfil.php', 'Conta'],
+    ];
+    echo '</main>';
+    echo '<nav class="bb-nav" aria-label="Menu barbeiro">';
+    foreach ($items as $key => [$href, $label]) {
+        $on = $active === $key ? ' active' : '';
+        echo '<a class="bb-nav-item' . $on . '" href="' . e(url($href)) . '">';
+        echo '<span class="bb-nav-ico">' . ($icons[$key] ?? '') . '</span>';
+        echo '<span class="bb-nav-label">' . e($label) . '</span></a>';
     }
     echo '</nav></div>';
-    render_scripts(true);
+    render_scripts(false, true);
 }
 

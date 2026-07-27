@@ -24,22 +24,22 @@ $mine = array_values(array_filter(
     store_read('stock_history'),
     fn($h) => (int)($h['user_id'] ?? 0) === (int)$user['id']
 ));
-usort($mine, fn($a, $b) => strcmp((string)($b['date'] ?? ''), (string)($a['date'] ?? '')));
+usort($mine, fn($h1, $h2) => strcmp((string)($h2['date'] ?? ''), (string)($h1['date'] ?? '')));
 $mine = array_slice($mine, 0, 12);
 
 barber_shell_start('Produtos', 'produtos');
 ?>
-<p class="bb-lead">Lance o que vendeu ou usou no atendimento. O estoque baixa na hora.</p>
+<p class="bb-lead">Lance venda ou uso. O estoque baixa na hora.</p>
 
 <?php if (!$items): ?>
-  <div class="bb-empty">Nenhum produto no estoque. Peça ao dono para cadastrar.</div>
+  <div class="bb-empty">Nenhum produto. Peça ao dono para cadastrar.</div>
 <?php else: ?>
   <div class="bb-list">
     <?php foreach ($items as $p): ?>
       <article class="bb-card">
         <div class="bb-card-top">
           <div class="bb-card-name" style="margin:0"><?= e($p['name']) ?></div>
-          <div class="bb-stock"><?= (int)$p['qty'] ?> un.</div>
+          <span class="bb-stock"><?= (int)$p['qty'] ?> un.</span>
         </div>
         <div class="bb-card-meta">
           <?php if ((float)($p['price'] ?? 0) > 0): ?>
@@ -52,7 +52,7 @@ barber_shell_start('Produtos', 'produtos');
           <?= csrf_field() ?>
           <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
           <label class="bb-qty">
-            Qtd
+            <span>Qtd</span>
             <input type="number" name="qty" min="1" max="<?= max(1, (int)$p['qty']) ?>" value="1" inputmode="numeric">
           </label>
           <div class="bb-actions">

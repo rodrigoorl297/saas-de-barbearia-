@@ -15,8 +15,27 @@ A marca do **painel** (software) é fixa. Logo/nome da **barbearia** valem só n
 ## Requisitos
 
 - PHP **8.1+**
-- Extensões: `json`, `session`, `curl` (Mercado Pago / WhatsApp), `fileinfo` (uploads)
+- Extensões: `json`, `session`, `curl`, `pdo_mysql` (produção)
 - Apache com `mod_rewrite` (ou Nginx equivalente bloqueando `/data` e `.env`)
+
+### Banco de dados (escala)
+
+- **1 banco MySQL por barbearia** (ex.: `barbaflow`, `bf_outra_loja`)
+- Schema: [`sql/barbearia_schema.sql`](sql/barbearia_schema.sql)
+- Cadastro de lojas (opcional): [`sql/plataforma_barbearias.sql`](sql/plataforma_barbearias.sql)
+- Tabelas: `usuarios` (visões `donos` / `barbeiros` / `clientes`), `produtos`, `servicos`, `agendamentos`, `configuracoes`, etc.
+
+No `.env` da hospedagem:
+
+```env
+DB_ENABLED=true
+DB_HOST=localhost
+DB_NAME=barbaflow
+DB_USER=barbaflow
+DB_PASS=sua_senha
+```
+
+Depois abra `/instalar-banco.php` uma vez (cria tabelas + importa JSON se o banco estiver vazio) e **apague** o arquivo.
 
 ---
 
