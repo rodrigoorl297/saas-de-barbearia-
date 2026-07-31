@@ -1,0 +1,30 @@
+# Secrets e ambiente local
+.env
+login-headers.txt
+
+# Config local de ferramentas de IA
+.claude/
+
+# Dados e uploads gerados em runtime
+/data/*
+!/data/.htaccess
+!/data/.gitkeep
+/uploads/*
+!/uploads/.htaccess
+!/uploads/.gitkeep
+!/uploads/barbeiros/.gitkeep
+!/uploads/servicos/.gitkeep
+
+# Dependências e cache
+/vendor/
+composer.lock
+.DS_Store
+Thumbs.db
+.next/
+node_modules/
+/scratch/
+
+# Temporários / dumps locais
+*.log
+scripts/_*.php
+scripts/_*.ps1
