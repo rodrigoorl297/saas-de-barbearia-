@@ -523,3 +523,102 @@ function available_slots(int $barberId, string $date, int $durationMin = 60): ar
     }
     return $slots;
 }
+
+/**
+ * Cria ou atualiza cliente (role=cliente). Retorna o usuário salvo.
+ */
+function upsert_client(array $data): array
+{
+    $id = (int)($data['id'] ?? 0);
+    $name = trim((string)($data['name'] ?? ''));
+    $phone = preg_replace('/\D+/', '', (string)($data['phone'] ?? ''));
+    $birth = trim((string)($data['birth_date'] ?? ''));
+    if ($birth !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $birth)) {
+        $ts = strtotime($birth);
+        $birth = $ts ? date('Y-m-d', $ts) : '';
+    }
+
+    if ($id < 1) {
+        $existing = find_client_by_phone($phone);
+        if ($existing) {
+            $id = (int)$existing['id'];
+        }
+    }
+
+    if ($id > 0) {
+        $cur = find_user_by_id($id);
+        if (!$cur || ($cur['role'] ?? '') !== 'cliente') {
+            throw new InvalidArgumentException('Cliente não encontrado.');
+        }
+        return save_user([
+            'id' => $id,
+            'name' => $name,
+            'phone' => $phone,
+            'birth_date' => $birth !== '' ? $birth : ($cur['birth_date'] ?? null),
+            'email' => $cur['email'] ?? null,
+            'password' => $cur['password'] ?? password_hash($phone, PASSWORD_DEFAULT),
+            'role' => 'cliente',
+            'active' => 1,
+            'avatar' => $cur['avatar'] ?? null,
+        ]);
+    }
+
+    return save_user([
+        'name' => $name,
+        'phone' => $phone,
+        'birth_date' => $birth !== '' ? $birth : null,
+        'email' => null,
+        'password' => password_hash($phone, PASSWORD_DEFAULT),
+        'role' => 'cliente',
+        'active' => 1,
+        'avatar' => null,
+    ]);
+}
+
+/**
+ * Agenda serviço para um cliente. Retorna o agendamento ou mensagem de erro.
+ * @return array|string
+ */
+function book_service_for_client(int $clientId, int $barberId, int $serviceId, string $date, string $time)
+{
+    $client = find_user_by_id($clientId);
+    if (!$client || ($client['role'] ?? '') !== 'cliente') {
+        return 'Cliente inválido.';
+    }
+    $barber = find_user_by_id($barberId);
+    if (!$barber || ($barber['role'] ?? '') !== 'barbeiro' || empty($barber['active'])) {
+        return 'Barbeiro inválido.';
+    }
+    $service = find_service($serviceId);
+    if (!$service || empty($service['active'])) {
+        return 'Serviço inválido.';
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return 'Data inválida.';
+    }
+    $time = normalize_time($time, '');
+    if ($time === '') {
+        return 'Horário inválido.';
+    }
+
+    $duration = max(15, (int)($service['duration_min'] ?? 30));
+    $slots = available_slots($barberId, $date, $duration);
+    if (!in_array($time, $slots, true)) {
+        return 'Horário indisponível para este barbeiro/serviço.';
+    }
+
+    return save_appointment([
+        'client_id' => $clientId,
+        'client_name' => $client['name'] ?? '',
+        'client_phone' => preg_replace('/\D+/', '', (string)($client['phone'] ?? '')),
+        'barber_id' => $barberId,
+        'service_id' => $serviceId,
+        'service_ids' => [$serviceId],
+        'date' => $date,
+        'time' => $time,
+        'status' => 'agendado',
+        'notes' => null,
+        'price' => (float)($service['price'] ?? 0),
+        'products' => [],
+    ]);
+}

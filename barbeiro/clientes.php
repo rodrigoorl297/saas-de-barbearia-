@@ -3,6 +3,9 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/layout.php';
 
 $user = require_role(['barbeiro']);
+$services = active_services();
+$today = date('Y-m-d');
+$barberId = (int)$user['id'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'save';
@@ -11,47 +14,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim($_POST['name'] ?? '');
         $phone = preg_replace('/\D+/', '', (string)($_POST['phone'] ?? ''));
         $birth = trim($_POST['birth_date'] ?? '');
+        $serviceId = (int)($_POST['service_id'] ?? 0);
+        $date = trim($_POST['date'] ?? $today);
+        $time = trim($_POST['time'] ?? '');
+        $wantBook = $id < 1 || !empty($_POST['also_book']);
 
         if ($name === '' || strlen($phone) < 10) {
             flash('danger', 'Informe nome e telefone válidos (com DDD).');
             redirect(url('barbeiro/clientes.php'));
         }
 
-        $existing = find_client_by_phone($phone);
-        if ($id < 1 && $existing) {
-            $id = (int)$existing['id'];
+        if ($wantBook && ($serviceId < 1 || $time === '')) {
+            flash('danger', 'Para agendar, escolha o serviço e o horário.');
+            redirect(url('barbeiro/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
-        if ($id > 0) {
-            $cur = find_user_by_id($id);
-            if (!$cur || ($cur['role'] ?? '') !== 'cliente') {
-                flash('danger', 'Cliente não encontrado.');
-                redirect(url('barbeiro/clientes.php'));
-            }
-            save_user([
+
+        try {
+            $client = upsert_client([
                 'id' => $id,
                 'name' => $name,
                 'phone' => $phone,
-                'birth_date' => $birth !== '' ? $birth : ($cur['birth_date'] ?? null),
-                'email' => $cur['email'] ?? null,
-                'password' => $cur['password'] ?? password_hash($phone, PASSWORD_DEFAULT),
-                'role' => 'cliente',
-                'active' => 1,
-                'avatar' => $cur['avatar'] ?? null,
+                'birth_date' => $birth,
             ]);
-            flash('success', $existing && (int)($_POST['id'] ?? 0) < 1 ? 'Cliente já existia — dados atualizados.' : 'Cliente atualizado.');
-        } else {
-            save_user([
-                'name' => $name,
-                'phone' => $phone,
-                'birth_date' => $birth !== '' ? $birth : null,
-                'email' => null,
-                'password' => password_hash($phone, PASSWORD_DEFAULT),
-                'role' => 'cliente',
-                'active' => 1,
-                'avatar' => null,
-            ]);
-            flash('success', 'Cliente cadastrado. Senha inicial = telefone.');
+        } catch (Throwable $e) {
+            flash('danger', $e->getMessage());
+            redirect(url('barbeiro/clientes.php'));
         }
+
+        $msg = $id > 0
+            ? 'Cliente atualizado.'
+            : 'Cliente cadastrado. Senha inicial = telefone.';
+
+        if ($wantBook) {
+            $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
+            if (is_string($booked)) {
+                flash('warning', $msg . ' Agendamento não criado: ' . $booked);
+                redirect(url('barbeiro/clientes.php'));
+            }
+            $svc = find_service($serviceId);
+            $msg .= ' Agendado: ' . ($svc['name'] ?? 'serviço') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '.';
+        }
+        flash('success', $msg);
     }
     redirect(url('barbeiro/clientes.php'));
 }
@@ -92,9 +95,21 @@ if (isset($_GET['edit'])) {
     }
 }
 
+$formDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['date'] ?? '')) ? (string)$_GET['date'] : $today;
+$formService = (int)($_GET['service_id'] ?? ($services[0]['id'] ?? 0));
+$formDuration = 60;
+foreach ($services as $s) {
+    if ((int)$s['id'] === $formService) {
+        $formDuration = max(15, (int)($s['duration_min'] ?? 60));
+        break;
+    }
+}
+$formSlots = available_slots($barberId, $formDate, $formDuration);
+$openSheet = $edit || isset($_GET['service_id']) || isset($_GET['date']) || isset($_GET['new']);
+
 barber_shell_start('Clientes', 'clientes');
 ?>
-<p class="bb-lead">Cadastre clientes da loja. A senha inicial fica o telefone.</p>
+<p class="bb-lead">Cadastre o cliente, escolha o serviço e agende com você.</p>
 
 <div class="bb-date" style="margin-bottom:12px">
   <form method="get" action="<?= e(url('barbeiro/clientes.php')) ?>" style="flex:1">
@@ -102,7 +117,7 @@ barber_shell_start('Clientes', 'clientes');
       <input type="search" name="q" value="<?= e($q) ?>" placeholder="Nome ou telefone" enterkeyhint="search">
     </label>
   </form>
-  <button type="button" class="bb-btn bb-btn--ok" style="min-height:44px;padding:.55rem .9rem;align-self:flex-end" data-bs-toggle="offcanvas" data-bs-target="#clientSheet">+ Novo</button>
+  <a class="bb-btn bb-btn--ok" style="min-height:44px;padding:.55rem .9rem;align-self:flex-end;text-decoration:none;display:grid;place-items:center" href="<?= e(url('barbeiro/clientes.php?new=1')) ?>">+ Novo</a>
 </div>
 
 <?php if (!$clients): ?>
@@ -131,12 +146,12 @@ barber_shell_start('Clientes', 'clientes');
   <div class="bb-sheet-head">
     <div>
       <h2 class="bb-sheet-title"><?= $edit ? 'Editar cliente' : 'Novo cliente' ?></h2>
-      <div class="bb-sheet-sub">Nome e WhatsApp</div>
+      <div class="bb-sheet-sub">Dados + serviço com você</div>
     </div>
     <button type="button" class="bb-sheet-close" data-bs-dismiss="offcanvas" aria-label="Fechar">×</button>
   </div>
   <div class="bb-sheet-body">
-    <form method="post" class="bb-form">
+    <form method="post" class="bb-form" id="clientForm">
       <?= csrf_field() ?>
       <input type="hidden" name="action" value="save">
       <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
@@ -152,10 +167,52 @@ barber_shell_start('Clientes', 'clientes');
         <span>Nascimento (opcional)</span>
         <input type="date" name="birth_date" value="<?= e($edit['birth_date'] ?? '') ?>">
       </label>
+
+      <?php if ($edit): ?>
+        <label class="bb-check">
+          <input type="checkbox" name="also_book" value="1" id="alsoBook">
+          <span>Também agendar atendimento comigo</span>
+        </label>
+      <?php endif; ?>
+
+      <div id="bookFields" class="<?= $edit ? 'bb-book-hidden' : '' ?>">
+        <label>
+          <span>Tipo de serviço</span>
+          <select name="service_id" id="bookService" <?= $edit ? '' : 'required' ?>>
+            <option value="">Selecione…</option>
+            <?php foreach ($services as $s): ?>
+              <option value="<?= (int)$s['id'] ?>" <?= $formService === (int)$s['id'] ? 'selected' : '' ?>>
+                <?= e($s['name']) ?> · <?= e(money((float)$s['price'])) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label>
+          <span>Barbeiro</span>
+          <input value="<?= e($user['name'] ?? 'Você') ?>" disabled>
+        </label>
+        <label>
+          <span>Data</span>
+          <input type="date" name="date" id="bookDate" value="<?= e($formDate) ?>" <?= $edit ? '' : 'required' ?>>
+        </label>
+        <label>
+          <span>Horário</span>
+          <select name="time" id="bookTime" <?= $edit ? '' : 'required' ?>>
+            <option value="">Selecione…</option>
+            <?php foreach ($formSlots as $slot): ?>
+              <option value="<?= e($slot) ?>"><?= e($slot) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <?php if (!$formSlots): ?>
+          <p class="bb-live-hint" style="color:#fca5a5">Sem horários livres neste dia. Troque a data.</p>
+        <?php endif; ?>
+      </div>
+
       <?php if (!$edit): ?>
         <p class="bb-live-hint">Senha inicial do app do cliente = telefone.</p>
       <?php endif; ?>
-      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit"><?= $edit ? 'Salvar' : 'Cadastrar cliente' ?></button>
+      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit"><?= $edit ? 'Salvar' : 'Cadastrar e agendar' ?></button>
       <?php if ($edit): ?>
         <a class="bb-btn bb-btn--ghost bb-btn--block" style="text-align:center;text-decoration:none" href="<?= e(url('barbeiro/clientes.php')) ?>">Cancelar</a>
       <?php endif; ?>
@@ -163,12 +220,67 @@ barber_shell_start('Clientes', 'clientes');
   </div>
 </div>
 
-<?php if ($edit): ?>
+<style>
+.bb-book-hidden { display: none !important; }
+.bb-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+  color: #e8eaf0;
+  font-size: .95rem;
+}
+.bb-check input { width: 20px; height: 20px; accent-color: #c9a227; }
+.bb-form select {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: #12151d;
+  color: #fff;
+  padding: .9rem 1rem;
+  font: inherit;
+  min-height: 48px;
+}
+</style>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const el = document.getElementById('clientSheet');
-  if (el && window.bootstrap) bootstrap.Offcanvas.getOrCreateInstance(el).show();
+  const sheet = document.getElementById('clientSheet');
+  const also = document.getElementById('alsoBook');
+  const book = document.getElementById('bookFields');
+  const svc = document.getElementById('bookService');
+  const date = document.getElementById('bookDate');
+  const time = document.getElementById('bookTime');
+
+  function toggleBook() {
+    if (!book) return;
+    const on = !also || also.checked;
+    book.classList.toggle('bb-book-hidden', !on);
+    [svc, date, time].forEach((el) => {
+      if (!el) return;
+      if (on) el.setAttribute('required', 'required');
+      else el.removeAttribute('required');
+    });
+  }
+  if (also) also.addEventListener('change', toggleBook);
+  toggleBook();
+
+  function reloadSlots() {
+    const params = new URLSearchParams();
+    <?php if ($edit): ?>
+    params.set('edit', '<?= (int)$edit['id'] ?>');
+    <?php else: ?>
+    params.set('new', '1');
+    <?php endif; ?>
+    if (svc?.value) params.set('service_id', svc.value);
+    if (date?.value) params.set('date', date.value);
+    window.location.href = <?= json_encode(url('barbeiro/clientes.php')) ?> + '?' + params.toString();
+  }
+  [svc, date].forEach((el) => el && el.addEventListener('change', reloadSlots));
+
+  <?php if ($openSheet): ?>
+  if (sheet && window.bootstrap) bootstrap.Offcanvas.getOrCreateInstance(sheet).show();
+  <?php endif; ?>
 });
 </script>
-<?php endif; ?>
 <?php barber_shell_end('clientes'); ?>
