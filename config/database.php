@@ -110,6 +110,10 @@ function ensure_extra_tables(): void
             'setup_completed' => 1,
             'wa_phone_number_id' => '',
             'wa_access_token' => '',
+            'loyalty_prata_min' => 100,
+            'loyalty_ouro_min' => 200,
+            'loyalty_points_per_real' => 1,
+            'loyalty_rewards_json' => '[]',
         ];
         foreach ($defaults as $k => $v) {
             if (!array_key_exists($k, $s)) {
@@ -512,6 +516,134 @@ function sync_appointment_cash(array $appointment, int $createdBy): void
         'amount' => $amount,
         'appointment_id' => $id,
         'created_by' => $createdBy,
+    ]);
+}
+
+/** Faixas de nível do fidelidade (configuráveis na aba Fidelidade). */
+function loyalty_thresholds(): array
+{
+    $cfg = settings();
+    return [
+        'prata' => max(1, (int)($cfg['loyalty_prata_min'] ?? 100)),
+        'ouro' => max(1, (int)($cfg['loyalty_ouro_min'] ?? 200)),
+    ];
+}
+
+function loyalty_tier_for_points(int $points): string
+{
+    $t = loyalty_thresholds();
+    if ($points >= $t['ouro']) {
+        return 'Ouro';
+    }
+    if ($points >= $t['prata']) {
+        return 'Prata';
+    }
+    return 'Bronze';
+}
+
+function loyalty_points_per_real(): float
+{
+    return max(0, (float)(settings()['loyalty_points_per_real'] ?? 1));
+}
+
+function loyalty_rewards(): array
+{
+    $raw = settings()['loyalty_rewards_json'] ?? '[]';
+    $rows = is_array($raw) ? $raw : json_decode((string)$raw ?: '[]', true);
+    return is_array($rows) ? $rows : [];
+}
+
+function save_loyalty_rewards(array $rewards): void
+{
+    save_settings(['loyalty_rewards_json' => json_encode(array_values($rewards), JSON_UNESCAPED_UNICODE)]);
+}
+
+function find_loyalty_member(int $id): ?array
+{
+    foreach (store_read('loyalty') as $m) {
+        if ((int)($m['id'] ?? 0) === $id) {
+            return $m;
+        }
+    }
+    return null;
+}
+
+function find_loyalty_member_by_phone(string $phone): ?array
+{
+    $phone = preg_replace('/\D+/', '', $phone);
+    foreach (store_read('loyalty') as $m) {
+        if (preg_replace('/\D+/', '', (string)($m['client_phone'] ?? '')) === $phone && $phone !== '') {
+            return $m;
+        }
+    }
+    return null;
+}
+
+/**
+ * Ajusta pontos de um cliente (cria o membro se necessário) e registra no histórico.
+ */
+function loyalty_add_points(string $phone, string $name, int $delta, string $reason, array $meta = []): array
+{
+    $phone = preg_replace('/\D+/', '', $phone);
+    $rows = store_read('loyalty');
+    $idx = null;
+    foreach ($rows as $i => $m) {
+        if (preg_replace('/\D+/', '', (string)($m['client_phone'] ?? '')) === $phone) {
+            $idx = $i;
+            break;
+        }
+    }
+    if ($idx === null) {
+        $rows[] = [
+            'id' => store_next_id('loyalty'),
+            'client_phone' => $phone,
+            'client_name' => $name,
+            'points' => 0,
+            'tier' => 'Bronze',
+            'history' => [],
+        ];
+        $idx = count($rows) - 1;
+    }
+
+    $points = max(0, (int)($rows[$idx]['points'] ?? 0) + $delta);
+    $rows[$idx]['points'] = $points;
+    $rows[$idx]['tier'] = loyalty_tier_for_points($points);
+    $history = $rows[$idx]['history'] ?? [];
+    $history[] = array_merge([
+        'date' => date('c'),
+        'delta' => $delta,
+        'reason' => $reason,
+    ], $meta);
+    $rows[$idx]['history'] = array_slice($history, -50);
+
+    store_write('loyalty', $rows);
+    return $rows[$idx];
+}
+
+/** Concede pontos automaticamente ao concluir um agendamento (idempotente). */
+function sync_appointment_loyalty(array $appointment): void
+{
+    $id = (int)($appointment['id'] ?? 0);
+    $phone = preg_replace('/\D+/', '', (string)($appointment['client_phone'] ?? ''));
+    if ($id <= 0 || $phone === '') {
+        return;
+    }
+
+    $member = find_loyalty_member_by_phone($phone);
+    foreach (($member['history'] ?? []) as $h) {
+        if (($h['type'] ?? '') === 'agendamento' && (int)($h['appointment_id'] ?? 0) === $id) {
+            return;
+        }
+    }
+
+    $points = (int)floor((float)($appointment['price'] ?? 0) * loyalty_points_per_real());
+    if ($points <= 0) {
+        return;
+    }
+
+    loyalty_add_points($phone, (string)($appointment['client_name'] ?? ''), $points, 'Agendamento concluído', [
+        'type' => 'agendamento',
+        'appointment_id' => $id,
     ]);
 }
 

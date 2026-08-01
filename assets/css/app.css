@@ -928,6 +928,9 @@ body.is-admin a { color: #e0bf4a; text-decoration: none; }
 .table-darkish th, .table-darkish td {
   color: #0f172a;
 }
+.badge-tier.bronze { background: #eadbc8; color: #8a5a2b; }
+.badge-tier.prata { background: #e2e8f0; color: #475569; }
+.badge-tier.ouro { background: linear-gradient(135deg, #c9a227, #e0bf4a); color: #111; }
 .sidebar {
   width: 260px;
   min-height: 100vh;

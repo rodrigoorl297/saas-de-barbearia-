@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS configuracoes (
   mp_access_token VARCHAR(255) NULL,
   wa_phone_number_id VARCHAR(64) NULL,
   wa_access_token VARCHAR(255) NULL,
+  loyalty_prata_min INT NOT NULL DEFAULT 100,
+  loyalty_ouro_min INT NOT NULL DEFAULT 200,
+  loyalty_points_per_real DECIMAL(6,2) NOT NULL DEFAULT 1.00,
+  loyalty_rewards_json JSON NULL,
   updated_at DATETIME NULL ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

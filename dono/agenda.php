@@ -40,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $a['status'] = 'concluido';
                 save_appointment($a);
                 sync_appointment_cash($a, (int)$user['id']);
+                sync_appointment_loyalty($a);
                 flash('success', 'Serviços atualizados e faturados: ' . money($price));
                 // Concluído sai da agenda e vai para o histórico
                 redirect($agendaUrl($date, 'historico'));

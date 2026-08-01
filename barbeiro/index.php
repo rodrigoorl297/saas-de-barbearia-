@@ -77,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             save_appointment($a);
             sync_appointment_cash($a, (int)$user['id']);
+            sync_appointment_loyalty($a);
             $msg = 'Atendimento concluído · ' . money((float)$a['price']);
             if ($added) {
                 $msg .= ' (com ' . count($added) . ' produto(s))';

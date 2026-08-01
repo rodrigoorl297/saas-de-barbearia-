@@ -144,12 +144,12 @@ function db_row_from_sql(string $logical, array $row): array
     if (isset($row['id'])) {
         $row['id'] = (int)$row['id'];
     }
-    foreach (['active', 'qty', 'min_qty', 'duration_min', 'sort_order', 'slot_minutes', 'lunch_enabled', 'setup_completed'] as $k) {
+    foreach (['active', 'qty', 'min_qty', 'duration_min', 'sort_order', 'slot_minutes', 'lunch_enabled', 'setup_completed', 'loyalty_prata_min', 'loyalty_ouro_min'] as $k) {
         if (array_key_exists($k, $row) && $row[$k] !== null) {
             $row[$k] = (int)$row[$k];
         }
     }
-    foreach (['price', 'cost', 'amount', 'commission_rate', 'target'] as $k) {
+    foreach (['price', 'cost', 'amount', 'commission_rate', 'target', 'loyalty_points_per_real'] as $k) {
         if (array_key_exists($k, $row) && $row[$k] !== null) {
             $row[$k] = (float)$row[$k];
         }
@@ -213,12 +213,14 @@ function db_upsert_settings(PDO $pdo, array $row): void
         id, shop_name, slug, phone, address, instagram, maps_url, logo_url,
         primary_color, accent_color, open_time, close_time, lunch_start, lunch_end,
         slot_minutes, lunch_enabled, commission_rate, setup_completed,
-        mp_public_key, mp_access_token, wa_phone_number_id, wa_access_token
+        mp_public_key, mp_access_token, wa_phone_number_id, wa_access_token,
+        loyalty_prata_min, loyalty_ouro_min, loyalty_points_per_real, loyalty_rewards_json
       ) VALUES (
         1, :shop_name, :slug, :phone, :address, :instagram, :maps_url, :logo_url,
         :primary_color, :accent_color, :open_time, :close_time, :lunch_start, :lunch_end,
         :slot_minutes, :lunch_enabled, :commission_rate, :setup_completed,
-        :mp_public_key, :mp_access_token, :wa_phone_number_id, :wa_access_token
+        :mp_public_key, :mp_access_token, :wa_phone_number_id, :wa_access_token,
+        :loyalty_prata_min, :loyalty_ouro_min, :loyalty_points_per_real, :loyalty_rewards_json
       )';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
@@ -243,6 +245,12 @@ function db_upsert_settings(PDO $pdo, array $row): void
         ':mp_access_token' => $row['mp_access_token'] ?? null,
         ':wa_phone_number_id' => $row['wa_phone_number_id'] ?? null,
         ':wa_access_token' => $row['wa_access_token'] ?? null,
+        ':loyalty_prata_min' => (int)($row['loyalty_prata_min'] ?? 100),
+        ':loyalty_ouro_min' => (int)($row['loyalty_ouro_min'] ?? 200),
+        ':loyalty_points_per_real' => (float)($row['loyalty_points_per_real'] ?? 1),
+        ':loyalty_rewards_json' => isset($row['loyalty_rewards_json'])
+            ? (is_string($row['loyalty_rewards_json']) ? $row['loyalty_rewards_json'] : json_encode($row['loyalty_rewards_json'], JSON_UNESCAPED_UNICODE))
+            : '[]',
     ]);
 }
 
@@ -476,6 +484,18 @@ function db_install_schema_if_needed(): void
         $cols = $pdo->query("SHOW COLUMNS FROM usuarios LIKE 'birth_date'")->fetch();
         if (!$cols) {
             $pdo->exec('ALTER TABLE usuarios ADD COLUMN birth_date DATE NULL AFTER avatar');
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM configuracoes LIKE 'loyalty_prata_min'")->fetch();
+        if (!$cols) {
+            $pdo->exec("ALTER TABLE configuracoes
+                ADD COLUMN loyalty_prata_min INT NOT NULL DEFAULT 100,
+                ADD COLUMN loyalty_ouro_min INT NOT NULL DEFAULT 200,
+                ADD COLUMN loyalty_points_per_real DECIMAL(6,2) NOT NULL DEFAULT 1.00,
+                ADD COLUMN loyalty_rewards_json JSON NULL");
         }
     } catch (Throwable $e) {
         // ignore
