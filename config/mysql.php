@@ -74,7 +74,7 @@ function db_physical_table(string $logical): string
 function db_is_json_blob_table(string $logical): bool
 {
     return in_array($logical, [
-        'subscriptions', 'charges', 'client_cards', 'campaigns', 'loyalty', 'goals', 'notifications',
+        'client_cards', 'campaigns', 'loyalty', 'goals', 'notifications',
     ], true);
 }
 
@@ -125,6 +125,38 @@ function db_row_from_sql(string $logical, array $row): array
         $row['service_id'] = $row['service_id'] !== null ? (int)$row['service_id'] : null;
         $row['price'] = (float)$row['price'];
         return $row;
+    }
+
+    if ($logical === 'subscriptions') {
+        return [
+            'id' => (int)$row['id'],
+            'client_id' => isset($row['client_id']) ? (int)$row['client_id'] : 0,
+            'client_phone' => $row['client_phone'] ?? '',
+            'plan_id' => isset($row['plan_id']) ? (int)$row['plan_id'] : 0,
+            'status' => $row['status'] ?? 'active',
+            'usage_count' => (int)($row['usage_count'] ?? 0),
+            'started_at' => $row['started_at'] ?? '',
+            'renews_at' => $row['renews_at'] ?? '',
+            'card_id' => isset($row['card_id']) ? (int)$row['card_id'] : 0,
+            'mp_payment_id' => $row['mp_payment_id'] ?? '',
+            'created_at' => $row['created_at'] ?? '',
+        ];
+    }
+
+    if ($logical === 'charges') {
+        return [
+            'id' => (int)$row['id'],
+            'client_id' => isset($row['client_id']) ? (int)$row['client_id'] : 0,
+            'plan_id' => isset($row['plan_id']) ? (int)$row['plan_id'] : 0,
+            'plan_name' => $row['plan_name'] ?? '',
+            'amount' => (float)($row['amount'] ?? 0),
+            'card_last4' => $row['card_last4'] ?? '----',
+            'card_brand' => $row['card_brand'] ?? '',
+            'date' => $row['date'] ?? '',
+            'status' => $row['status'] ?? 'proxima',
+            'mp_payment_id' => $row['mp_payment_id'] ?? null,
+            'mp_status' => $row['mp_status'] ?? null,
+        ];
     }
 
     if ($logical === 'plans') {
@@ -393,6 +425,48 @@ function db_insert_row(PDO $pdo, string $logical, string $safeTable, array $row)
         return;
     }
 
+    if ($logical === 'subscriptions') {
+        $stmt = $pdo->prepare('INSERT INTO `' . $safeTable . '`
+            (id, client_id, client_phone, plan_id, status, usage_count, started_at, renews_at, card_id, mp_payment_id, created_at)
+            VALUES (:id, :client_id, :client_phone, :plan_id, :status, :usage_count, :started_at, :renews_at, :card_id, :mp_payment_id, :created_at)');
+        $stmt->execute([
+            ':id' => (int)($row['id'] ?? 0) ?: null,
+            ':client_id' => (int)($row['client_id'] ?? 0),
+            ':client_phone' => $row['client_phone'] ?? null,
+            ':plan_id' => (int)($row['plan_id'] ?? 0),
+            ':status' => (string)($row['status'] ?? 'active'),
+            ':usage_count' => (int)($row['usage_count'] ?? 0),
+            ':started_at' => $row['started_at'] ?: null,
+            ':renews_at' => $row['renews_at'] ?: null,
+            ':card_id' => isset($row['card_id']) && $row['card_id'] ? (int)$row['card_id'] : null,
+            ':mp_payment_id' => $row['mp_payment_id'] ?? null,
+            ':created_at' => isset($row['created_at']) && $row['created_at']
+                ? date('Y-m-d H:i:s', strtotime((string)$row['created_at']) ?: time())
+                : date('Y-m-d H:i:s'),
+        ]);
+        return;
+    }
+
+    if ($logical === 'charges') {
+        $stmt = $pdo->prepare('INSERT INTO `' . $safeTable . '`
+            (id, client_id, plan_id, plan_name, amount, card_last4, card_brand, date, status, mp_payment_id, mp_status)
+            VALUES (:id, :client_id, :plan_id, :plan_name, :amount, :card_last4, :card_brand, :date, :status, :mp_payment_id, :mp_status)');
+        $stmt->execute([
+            ':id' => (int)($row['id'] ?? 0) ?: null,
+            ':client_id' => (int)($row['client_id'] ?? 0),
+            ':plan_id' => (int)($row['plan_id'] ?? 0),
+            ':plan_name' => $row['plan_name'] ?? null,
+            ':amount' => (float)($row['amount'] ?? 0),
+            ':card_last4' => $row['card_last4'] ?? null,
+            ':card_brand' => $row['card_brand'] ?? null,
+            ':date' => (string)($row['date'] ?? date('Y-m-d')),
+            ':status' => (string)($row['status'] ?? 'proxima'),
+            ':mp_payment_id' => $row['mp_payment_id'] ?? null,
+            ':mp_status' => $row['mp_status'] ?? null,
+        ]);
+        return;
+    }
+
     if ($logical === 'plans') {
         $stmt = $pdo->prepare('INSERT INTO `' . $safeTable . '`
             (id, name, price, `interval`, headline, description, benefit_label, usage_limit, images, active)
@@ -499,6 +573,83 @@ function db_install_schema_if_needed(): void
         }
     } catch (Throwable $e) {
         // ignore
+    }
+
+    db_migrate_blob_table_to_columns($pdo, 'assinaturas', [
+        'client_id' => 'INT UNSIGNED NULL',
+        'client_phone' => 'VARCHAR(32) NULL',
+        'plan_id' => 'INT UNSIGNED NULL',
+        'status' => 'VARCHAR(20) NULL',
+        'usage_count' => 'INT NULL',
+        'started_at' => 'DATE NULL',
+        'renews_at' => 'DATE NULL',
+        'card_id' => 'INT UNSIGNED NULL',
+        'mp_payment_id' => 'VARCHAR(64) NULL',
+    ]);
+    db_migrate_blob_table_to_columns($pdo, 'cobrancas', [
+        'client_id' => 'INT UNSIGNED NULL',
+        'plan_id' => 'INT UNSIGNED NULL',
+        'plan_name' => 'VARCHAR(120) NULL',
+        'amount' => 'DECIMAL(10,2) NULL',
+        'card_last4' => 'VARCHAR(4) NULL',
+        'card_brand' => 'VARCHAR(40) NULL',
+        'date' => 'DATE NULL',
+        'status' => 'VARCHAR(20) NULL',
+        'mp_payment_id' => 'VARCHAR(64) NULL',
+        'mp_status' => 'VARCHAR(40) NULL',
+    ]);
+}
+
+/**
+ * Migra uma tabela que hoje só tem (id, data_json, created_at) para ter colunas
+ * reais também, preenchidas a partir do data_json existente. NÃO remove a coluna
+ * data_json nem falha a instalação inteira se algo der errado — aditivo e seguro
+ * de re-executar. Feito assim (em vez de DROP COLUMN data_json) porque esta
+ * migração não pôde ser testada contra um MySQL real antes de ser publicada;
+ * o dono pode confirmar os dados nas colunas novas e remover data_json manualmente
+ * depois, se quiser.
+ */
+function db_migrate_blob_table_to_columns(PDO $pdo, string $table, array $newColumns): void
+{
+    $safe = str_replace('`', '``', $table);
+    try {
+        $exists = $pdo->query("SHOW COLUMNS FROM `$safe` LIKE 'data_json'")->fetch();
+        if (!$exists) {
+            return; // tabela não existe ainda, ou já não tem data_json (já migrada e limpa)
+        }
+        $hasFirstNewCol = $pdo->query("SHOW COLUMNS FROM `$safe` LIKE '" . array_key_first($newColumns) . "'")->fetch();
+        if ($hasFirstNewCol) {
+            return; // já migrada
+        }
+
+        $alter = "ALTER TABLE `$safe` " . implode(', ', array_map(
+            fn($col, $def) => "ADD COLUMN `$col` $def",
+            array_keys($newColumns),
+            $newColumns
+        ));
+        $pdo->exec($alter);
+
+        $rows = $pdo->query("SELECT id, data_json FROM `$safe`")->fetchAll();
+        $setClause = implode(', ', array_map(fn($col) => "`$col` = :$col", array_keys($newColumns)));
+        $stmt = $pdo->prepare("UPDATE `$safe` SET $setClause WHERE id = :id");
+        foreach ($rows as $row) {
+            $data = json_decode((string)($row['data_json'] ?? '{}'), true);
+            if (!is_array($data)) {
+                $data = [];
+            }
+            $params = ['id' => (int)$row['id']];
+            foreach (array_keys($newColumns) as $col) {
+                $val = $data[$col] ?? null;
+                $params[$col] = $val === '' ? null : $val;
+            }
+            try {
+                $stmt->execute($params);
+            } catch (Throwable $e) {
+                error_log("Migração $table #$row[id]: " . $e->getMessage());
+            }
+        }
+    } catch (Throwable $e) {
+        error_log("Migração $table: " . $e->getMessage());
     }
 }
 

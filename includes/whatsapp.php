@@ -21,6 +21,30 @@ function wa_configured(): bool
     return $c['phone_number_id'] !== '' && $c['access_token'] !== '';
 }
 
+/** Mascara o telefone no log (mantém DDD e os 2 últimos dígitos). */
+function wa_mask_phone(string $phone): string
+{
+    $len = strlen($phone);
+    if ($len <= 6) {
+        return str_repeat('*', $len);
+    }
+    return substr($phone, 0, 4) . str_repeat('*', $len - 6) . substr($phone, -2);
+}
+
+/**
+ * Evita que o log de campanhas cresça indefinidamente: se passar de ~2MB,
+ * mantém só as últimas ~2000 linhas.
+ */
+function wa_rotate_log_if_needed(string $logFile, int $maxBytes = 2 * 1024 * 1024, int $keepLines = 2000): void
+{
+    if (!is_file($logFile) || filesize($logFile) < $maxBytes) {
+        return;
+    }
+    $lines = file($logFile, FILE_IGNORE_NEW_LINES) ?: [];
+    $tail = array_slice($lines, -$keepLines);
+    file_put_contents($logFile, implode("\n", $tail) . "\n", LOCK_EX);
+}
+
 function send_whatsapp_campaign(array $campaign): int
 {
     if (!wa_configured()) {
@@ -46,6 +70,7 @@ function send_whatsapp_campaign(array $campaign): int
     $count = 0;
     $logFile = __DIR__ . '/../data/whatsapp_log.txt';
     $timestamp = date('Y-m-d H:i:s');
+    wa_rotate_log_if_needed($logFile);
 
     foreach ($clients as $c) {
         $phone = preg_replace('/\D+/', '', (string)($c['phone'] ?? '')) ?: '';
@@ -55,6 +80,7 @@ function send_whatsapp_campaign(array $campaign): int
         if (!str_starts_with($phone, '55')) {
             $phone = '55' . $phone;
         }
+        $phoneMasked = wa_mask_phone($phone);
 
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -83,9 +109,9 @@ function send_whatsapp_campaign(array $campaign): int
             $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
             $ok = $code >= 200 && $code < 300;
-            $logMsg = "[$timestamp] HTTP $code | Tipo: $type | Cliente: {$c['name']} | Telefone: $phone | Template: $templateName | Resp: " . substr((string)$response, 0, 300) . "\n";
+            $logMsg = "[$timestamp] HTTP $code | Tipo: $type | Cliente: {$c['name']} | Telefone: $phoneMasked | Template: $templateName | Resp: " . substr((string)$response, 0, 300) . "\n";
         } else {
-            $logMsg = "[$timestamp] ERRO | curl indisponível | Cliente: {$c['name']} | Telefone: $phone\n";
+            $logMsg = "[$timestamp] ERRO | curl indisponível | Cliente: {$c['name']} | Telefone: $phoneMasked\n";
         }
 
         file_put_contents($logFile, $logMsg, FILE_APPEND);

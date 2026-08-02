@@ -31,19 +31,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'senha') {
-        $phone = preg_replace('/\D+/', '', $_SESSION['login_phone'] ?? ($_POST['phone'] ?? ''));
-        // Demo: aceita senha com qualquer coisa (números ou texto)
-        $senha = (defined('CLIENT_DEMO_OPEN') && CLIENT_DEMO_OPEN)
-            ? trim((string)($_POST['password'] ?? ''))
-            : preg_replace('/\D+/', '', $_POST['password'] ?? '');
-        $auth = attempt_client_login($phone, $senha);
-        if (!$auth) {
-            $error = 'Informe telefone e senha.';
+        if (login_client_is_locked()) {
+            $error = 'Muitas tentativas. Aguarde 15 minutos e tente de novo.';
             $step = 'senha';
         } else {
-            login_client($auth);
-            unset($_SESSION['login_phone']);
-            redirect(url('cliente/agendamentos.php?step=historico'));
+            $phone = preg_replace('/\D+/', '', $_SESSION['login_phone'] ?? ($_POST['phone'] ?? ''));
+            // Demo: aceita senha com qualquer coisa (números ou texto)
+            $senha = (defined('CLIENT_DEMO_OPEN') && CLIENT_DEMO_OPEN)
+                ? trim((string)($_POST['password'] ?? ''))
+                : preg_replace('/\D+/', '', $_POST['password'] ?? '');
+            $auth = attempt_client_login($phone, $senha);
+            if (!$auth) {
+                $error = login_client_is_locked()
+                    ? 'Muitas tentativas. Aguarde 15 minutos e tente de novo.'
+                    : 'Informe telefone e senha.';
+                $step = 'senha';
+            } else {
+                login_client($auth);
+                unset($_SESSION['login_phone']);
+                redirect(url('cliente/agendamentos.php?step=historico'));
+            }
         }
     }
 

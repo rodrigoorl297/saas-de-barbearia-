@@ -56,12 +56,16 @@ if (!$card) {
 
 $amount = (float) $plan['price'];
 $ext = 'plan-' . $planId . '-client-' . (int)$client['id'] . '-' . time();
+// Estável por cliente+plano: um duplo clique ou retry de rede reusa a mesma
+// chave em vez de gerar uma cobrança nova a cada tentativa.
+$idempotencyKey = 'plan-' . $planId . '-client-' . (int)$client['id'];
 $charge = mp_charge_saved_card(
     $client,
     $card,
     $amount,
     'Assinatura ' . ($plan['name'] ?? 'Plano'),
-    $ext
+    $ext,
+    $idempotencyKey
 );
 
 if (!$charge['ok']) {

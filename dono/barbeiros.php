@@ -47,8 +47,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $payload['password'] = ($password !== '')
                     ? password_hash($password, PASSWORD_DEFAULT)
                     : ($cur['password'] ?? '');
+                if ($password !== '') {
+                    // Dono redefiniu a senha manualmente: barbeiro precisa trocá-la no próximo acesso.
+                    $payload['must_change_password'] = 1;
+                }
             } else {
                 $payload['password'] = password_hash($password !== '' ? $password : 'barbeiro123', PASSWORD_DEFAULT);
+                if ($password === '') {
+                    // Sem senha customizada, caiu na senha padrão previsível — força troca no primeiro login.
+                    $payload['must_change_password'] = 1;
+                }
             }
             save_user($payload);
             flash('success', 'Barbeiro salvo com sucesso.');

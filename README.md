@@ -50,11 +50,15 @@ Depois abra `/instalar-banco.php` uma vez (cria tabelas + importa JSON se o banc
 ### Checklist de produção
 
 - [ ] `CLIENT_DEMO_OPEN=false` no `.env`
+- [ ] `APP_ENV=production` no `.env`
+- [ ] `APP_KEY` configurada (`php -r "echo base64_encode(random_bytes(32));"`) — criptografa tokens de MP/WhatsApp salvos em Configurações
 - [ ] Senha do dono alterada no setup
+- [ ] Senha do barbeiro seed (`barbeiro123`) alterada
+- [ ] `instalar-banco.php` removido do servidor após instalação
 - [ ] Logo e nome do **app do cliente** em Configurações
-- [ ] Mercado Pago (se for vender planos)
+- [ ] Mercado Pago configurado (se for vender planos) — ver [Cobrança recorrente de planos](#cobrança-recorrente-de-planos) abaixo
 - [ ] WhatsApp Meta (se for disparar campanhas)
-- [ ] Pasta `data/` inacessível pela web (`.htaccess` já bloqueia)
+- [ ] Pastas `data/`, `sql/` e `cron/` inacessíveis pela web (`.htaccess` já bloqueia)
 
 ---
 
@@ -95,7 +99,24 @@ php -S localhost:8080 router.php
 
 - Cliente: http://localhost:8080/cliente/  
 - Dono: http://localhost:8080/dono/login.php  
-- Demo aberta (opcional): `CLIENT_DEMO_OPEN=true` no `.env`
+- Demo aberta (opcional): `APP_ENV=development` **e** `CLIENT_DEMO_OPEN=true` no `.env` (por segurança, `CLIENT_DEMO_OPEN` é sempre ignorado quando `APP_ENV=production`, mesmo que esteja `true`)
+
+---
+
+## Cobrança recorrente de planos
+
+Assinaturas de plano (`/cliente/agendar-plano.php`) renovam mensalmente, mas a cobrança
+**não é automática por padrão** — é preciso agendar o script de cron:
+
+```bash
+# crontab da hospedagem, uma vez ao dia
+0 6 * * * php /caminho/do/site/cron/cobrar-renovacoes.php >> /caminho/do/site/data/cron.log 2>&1
+```
+
+O script cobra apenas assinaturas ativas com `renews_at` vencido, é seguro rodar mais
+de uma vez por dia (idempotente — não cobra duas vezes o mesmo ciclo) e nunca roda
+duas instâncias em paralelo. Sem esse cron configurado, o cliente vê "Será renovado
+em..." na conta dele, mas o cartão nunca é cobrado de novo automaticamente.
 
 ---
 
@@ -113,3 +134,64 @@ php -S localhost:8080 router.php
 - **WhatsApp:** exige conta Meta Cloud API + templates aprovados; sem token, Disparar não envia
 - **CSRF** ativo em formulários POST
 - Login do painel bloqueia após 5 tentativas (15 min)
+
+---
+
+## Arquitetura (para quem for dar manutenção)
+
+Guia rápido para um dev entendendo o projeto pela primeira vez — não é um guia de uso,
+é sobre como o código está organizado.
+
+### Estilo geral
+
+PHP procedural, sem framework: cada página em `dono/`, `barbeiro/` e `cliente/` é um
+arquivo único que lida com o POST, aplica a regra de negócio e imprime o HTML, tudo
+junto (não há controllers/services separados). A lógica reutilizável entre páginas
+fica em `includes/` (funções globais) e `config/database.php` (acesso a dados). Não
+há build step no frontend — `assets/js/*.js` é JS puro, `assets/css/app.css` é CSS puro.
+
+### Persistência dupla (JSON ou MySQL)
+
+O mesmo código roda em dois modos, controlados por `DB_ENABLED` no `.env`:
+
+- **Padrão (`DB_ENABLED=false`)**: cada "tabela" é um arquivo `data/{tabela}.json`
+  (array de linhas). `store_read()`/`store_write()` em `config/database.php` leem/escrevem
+  o arquivo inteiro a cada operação — simples, mas **reescreve o arquivo todo a cada
+  gravação** (sem update parcial de linha).
+- **MySQL (`DB_ENABLED=true`)**: `config/mysql.php` mapeia essas mesmas "tabelas
+  lógicas" para tabelas reais via `db_table_map()`. `db_replace_all()` também
+  **apaga e reinsere todas as linhas da tabela a cada escrita** (dentro de uma
+  transação) — o mesmo padrão de "reescrever tudo", só que em SQL.
+
+Por causa disso, **duas escritas concorrentes na mesma tabela lógica podem se
+sobrescrever** (a segunda escrita, que leu o estado antes da primeira salvar,
+sobrescreve o resultado da primeira ao salvar por cima). O agendamento (`cliente/confirmar.php`)
+já tem uma trava (`acquire_barber_agenda_lock()`) para o caso mais crítico
+(dois clientes reservando o mesmo horário), mas esse padrão de "reescrever a
+tabela inteira" continua valendo para as outras tabelas — uma refatoração maior
+para update/insert/delete direto por linha resolveria isso de vez, se algum dia
+o volume de escritas simultâneas justificar o esforço.
+
+Toda função que lê/escreve dados (`save_appointment`, `save_user`, `settings()` etc.)
+funciona nos dois modos sem saber qual está ativo — a escolha acontece dentro de
+`store_read()`/`store_write()`.
+
+### Roteamento
+
+Não há um router de verdade. `router.php` só existe para dar uma URL bonita
+(`/{slug-da-loja}/...`) ao app do cliente — ele reescreve internamente para
+`cliente/...` e segue a execução normal (sem redirect de verdade). Todo o resto
+(`dono/`, `barbeiro/`, `api/`) é acessado pelo caminho real do arquivo.
+
+### Onde procurar cada coisa
+
+| O quê | Onde |
+|---|---|
+| Autenticação (staff e cliente) | `includes/auth.php` |
+| Regras de negócio (agenda, clientes, slugs) | `includes/functions.php` |
+| Acesso a dados (JSON e MySQL) | `config/database.php`, `config/mysql.php` |
+| Layout/HTML compartilhado | `includes/layout.php` |
+| Integração Mercado Pago | `includes/mercadopago.php` |
+| Integração WhatsApp | `includes/whatsapp.php` |
+| Cobrança recorrente (cron) | `cron/cobrar-renovacoes.php` |
+| Schema MySQL | `sql/barbearia_schema.sql` |

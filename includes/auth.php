@@ -53,13 +53,24 @@ function require_role(array $roles): array
         redirect($target);
     }
 
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+
     // Primeiro acesso: forçar setup comercial
     if (($user['role'] ?? '') === 'dono' && in_array('dono', $roles, true)) {
         $setupDone = !empty(settings()['setup_completed']);
-        $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
         $onSetup = str_ends_with($script, '/dono/setup.php');
         if (!$setupDone && !$onSetup) {
             redirect(url('dono/setup.php'));
+        }
+    }
+
+    // Senha padrão/redefinida pelo dono: barbeiro precisa trocá-la antes de usar o resto do painel.
+    if (($user['role'] ?? '') === 'barbeiro' && in_array('barbeiro', $roles, true)) {
+        $mustChange = !empty($user['must_change_password']);
+        $onPerfil = str_ends_with($script, '/barbeiro/perfil.php');
+        if ($mustChange && !$onPerfil) {
+            flash('danger', 'Defina uma nova senha antes de continuar.');
+            redirect(url('barbeiro/perfil.php?trocar_senha=1'));
         }
     }
 
@@ -79,6 +90,22 @@ function login_register_failure(): void
     if ($attempts >= 5) {
         $_SESSION['login_locked_until'] = time() + 15 * 60;
         $_SESSION['login_attempts'] = 0;
+    }
+}
+
+function login_client_is_locked(): bool
+{
+    $until = (int)($_SESSION['client_login_locked_until'] ?? 0);
+    return $until > time();
+}
+
+function login_client_register_failure(): void
+{
+    $attempts = (int)($_SESSION['client_login_attempts'] ?? 0) + 1;
+    $_SESSION['client_login_attempts'] = $attempts;
+    if ($attempts >= 5) {
+        $_SESSION['client_login_locked_until'] = time() + 15 * 60;
+        $_SESSION['client_login_attempts'] = 0;
     }
 }
 
@@ -139,6 +166,7 @@ function current_client(): ?array
 
 function login_client(array $user): void
 {
+    session_regenerate_id(true);
     $_SESSION['client_id'] = (int) $user['id'];
     $_SESSION['client_phone'] = preg_replace('/\D+/', '', (string) ($user['phone'] ?? ''));
     $_SESSION['client_name'] = $user['name'] ?? '';
@@ -151,12 +179,17 @@ function logout_client(): void
 
 function attempt_client_login(string $phone, string $password): ?array
 {
+    if (login_client_is_locked()) {
+        return null;
+    }
+
     $phone = preg_replace('/\D+/', '', $phone);
     $password = trim($password);
 
     // Modo demo: qualquer número + qualquer senha libera o acesso
     if (defined('CLIENT_DEMO_OPEN') && CLIENT_DEMO_OPEN) {
         if ($phone === '' || $password === '') {
+            login_client_register_failure();
             return null;
         }
         $user = find_client_by_phone($phone);
@@ -171,15 +204,19 @@ function attempt_client_login(string $phone, string $password): ?array
                 'active' => 1,
             ]);
         }
+        unset($_SESSION['client_login_attempts'], $_SESSION['client_login_locked_until']);
         return $user;
     }
 
     $user = find_client_by_phone($phone);
     if (!$user || empty($user['password'])) {
+        login_client_register_failure();
         return null;
     }
     if (!password_verify($password, (string) $user['password'])) {
+        login_client_register_failure();
         return null;
     }
+    unset($_SESSION['client_login_attempts'], $_SESSION['client_login_locked_until']);
     return $user;
 }

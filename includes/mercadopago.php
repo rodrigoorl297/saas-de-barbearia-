@@ -178,13 +178,23 @@ function mp_create_card_token_from_saved(string $mpCardId): array
     ]);
 }
 
-function mp_charge_saved_card(array $client, array $card, float $amount, string $description, string $externalRef): array
+/**
+ * Cobra um cartão salvo. $idempotencyKey DEVE ser estável para a mesma tentativa
+ * lógica de cobrança (ex.: "plan-{planId}-client-{clientId}" para a assinatura
+ * inicial, ou "sub-{subId}-{renewsAt}" para uma renovação) — nunca gerado aleatório
+ * a cada chamada, senão retries de rede/reexecuções de cron não ficam protegidos
+ * contra cobrança duplicada.
+ */
+function mp_charge_saved_card(array $client, array $card, float $amount, string $description, string $externalRef, string $idempotencyKey): array
 {
     if (!mp_configured()) {
         return ['ok' => false, 'error' => 'Mercado Pago não configurado.', 'payment' => null];
     }
     if ($amount <= 0) {
         return ['ok' => false, 'error' => 'Valor inválido.', 'payment' => null];
+    }
+    if ($idempotencyKey === '') {
+        return ['ok' => false, 'error' => 'Chave de idempotência obrigatória.', 'payment' => null];
     }
 
     $mpCardId = trim((string)($card['mp_card_id'] ?? ''));
@@ -211,7 +221,7 @@ function mp_charge_saved_card(array $client, array $card, float $amount, string 
         ],
         'external_reference' => $externalRef,
         'capture' => true,
-    ], bin2hex(random_bytes(16)));
+    ], $idempotencyKey);
 
     if (!$payment['ok']) {
         return ['ok' => false, 'error' => $payment['error'] ?? 'Pagamento recusado.', 'payment' => $payment['data']];

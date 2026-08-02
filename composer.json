@@ -3,12 +3,14 @@
     "description": "SaaS para gestão de barbearias",
     "type": "project",
     "require": {
-        "php": ">=8.0",
-        "vlucas/phpdotenv": "^5.5"
+        "php": ">=8.1"
     },
     "autoload": {
         "psr-4": {
             "App\\": "src/"
         }
+    },
+    "scripts": {
+        "test": "php tests/run.php"
     }
 }

@@ -1,14 +1,21 @@
 /* ===== Réplica fiel do estilo agendas.link ===== */
 :root {
-  --backgroud-pagina: #11172f;
-  --cor-primaria: #11172f;
+  /* Cor da marca da barbearia (Configurações → primary_color/accent_color).
+     render_head() injeta o valor real por cima destes defaults — mudar a cor
+     em Configurações reflete tanto no painel (admin) quanto no app do cliente,
+     sem precisar duplicar a customização em dois lugares. */
+  --brand-primary: #11172f;
+  --brand-accent: #c9a227;
+
+  --backgroud-pagina: var(--brand-primary);
+  --cor-primaria: var(--brand-primary);
   --texto-pagina: #dedede;
   --sombra: #7987af;
-  --cards: #11172f;
+  --cards: var(--brand-primary);
   --texto-icones: #dedede;
-  --destaques: #11172f;
+  --destaques: var(--brand-primary);
   --botoes: #dedede;
-  --menu: #11172f;
+  --menu: var(--brand-primary);
   --icones-menu: #dedede;
   --opacidade: 0.2;
   --font: "League Spartan", sans-serif;

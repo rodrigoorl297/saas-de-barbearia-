@@ -4,13 +4,18 @@ require_once __DIR__ . '/../includes/layout.php';
 
 $user = require_role(['barbeiro']);
 $today = date('Y-m-d');
+$forcarTrocaSenha = !empty($user['must_change_password']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = trim($_POST['name'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $password = $_POST['password'] ?? '';
+    if ($forcarTrocaSenha && $password === '') {
+        flash('danger', 'Defina uma nova senha para continuar.');
+        redirect(url('barbeiro/perfil.php?trocar_senha=1'));
+    }
     if ($name !== '') {
-        save_user([
+        $payload = [
             'id' => (int)$user['id'],
             'name' => $name,
             'phone' => $phone,
@@ -19,7 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'active' => 1,
             'password' => $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : $user['password'],
             'avatar' => $user['avatar'] ?? null,
-        ]);
+        ];
+        if ($password !== '') {
+            $payload['must_change_password'] = 0;
+        }
+        save_user($payload);
         flash('success', 'Dados atualizados.');
         redirect(url('barbeiro/perfil.php'));
     }
@@ -45,6 +54,11 @@ if ($initials === '') {
 
 barber_shell_start('', 'conta');
 ?>
+<?php if ($forcarTrocaSenha): ?>
+  <div class="alert alert-danger m-3" role="alert">
+    Por segurança, defina uma senha nova antes de continuar usando o painel.
+  </div>
+<?php endif; ?>
 <section class="bb-profile">
   <div class="bb-profile-card">
     <button
@@ -135,11 +149,21 @@ barber_shell_start('', 'conta');
         <input name="phone" value="<?= e($user['phone'] ?? '') ?>" inputmode="tel">
       </label>
       <label>
-        <span>Nova senha (opcional)</span>
-        <input type="password" name="password" autocomplete="new-password" placeholder="Deixe em branco para manter">
+        <span>Nova senha <?= $forcarTrocaSenha ? '(obrigatória)' : '(opcional)' ?></span>
+        <input type="password" name="password" autocomplete="new-password" <?= $forcarTrocaSenha ? 'required' : '' ?> placeholder="<?= $forcarTrocaSenha ? 'Digite sua nova senha' : 'Deixe em branco para manter' ?>">
       </label>
       <button class="bb-btn bb-btn--ok bb-btn--block" type="submit">Salvar alterações</button>
     </form>
   </div>
 </div>
+<?php if ($forcarTrocaSenha): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('accountSettings');
+  if (el && window.bootstrap) {
+    new bootstrap.Offcanvas(el).show();
+  }
+});
+</script>
+<?php endif; ?>
 <?php barber_shell_end('conta'); ?>

@@ -80,45 +80,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm'])) {
     }
 
     if ($error === null && !empty($clientId)) {
-        $cursor = strtotime($booking['date'] . ' ' . $booking['time']);
-        foreach ($services as $svc) {
-            $price = (float)$svc['price'];
-            if (!empty($booking['from_plan']) && (int)$svc['id'] === $planServiceId) {
-                $price = 0;
-            }
-            save_appointment([
-                'client_id' => $clientId,
-                'client_name' => $name,
-                'client_phone' => $phone,
-                'barber_id' => (int)$booking['barber_id'],
-                'service_id' => (int)$svc['id'],
-                'date' => $booking['date'],
-                'time' => date('H:i', $cursor),
-                'status' => 'agendado',
-                'notes' => !empty($booking['from_plan']) ? 'Plano #' . (int)($booking['plan_id'] ?? 0) : null,
-                'price' => $price,
-            ]);
-            $cursor += ((int)$svc['duration_min'] * 60);
-        }
-
-        if (!empty($booking['from_plan']) && !empty($booking['subscription_id'])) {
-            $subs = store_read('subscriptions');
-            foreach ($subs as $i => $row) {
-                if ((int)$row['id'] === (int)$booking['subscription_id']) {
-                    $subs[$i]['usage_count'] = (int)($row['usage_count'] ?? 0) + 1;
-                    break;
+        $barberId = (int)$booking['barber_id'];
+        $lock = acquire_barber_agenda_lock($barberId);
+        if ($lock === false) {
+            $error = 'Não foi possível confirmar o horário. Tente novamente.';
+        } else {
+            try {
+                // Revalida dentro da trava: o horário escolhido na tela anterior pode
+                // já ter sido reservado por outro cliente enquanto este confirmava.
+                $cursor = strtotime($booking['date'] . ' ' . $booking['time']);
+                $toSave = [];
+                foreach ($services as $svc) {
+                    $price = (float)$svc['price'];
+                    if (!empty($booking['from_plan']) && (int)$svc['id'] === $planServiceId) {
+                        $price = 0;
+                    }
+                    $slotTime = date('H:i', $cursor);
+                    $slotDuration = max(15, (int)$svc['duration_min']);
+                    if (appointment_slot_conflicts($barberId, $booking['date'], $slotTime, $slotDuration)) {
+                        $error = 'Esse horário acabou de ser reservado por outra pessoa. Escolha outro horário.';
+                        break;
+                    }
+                    $toSave[] = [
+                        'client_id' => $clientId,
+                        'client_name' => $name,
+                        'client_phone' => $phone,
+                        'barber_id' => $barberId,
+                        'service_id' => (int)$svc['id'],
+                        'date' => $booking['date'],
+                        'time' => $slotTime,
+                        'status' => 'agendado',
+                        'notes' => !empty($booking['from_plan']) ? 'Plano #' . (int)($booking['plan_id'] ?? 0) : null,
+                        'price' => $price,
+                    ];
+                    $cursor += ($slotDuration * 60);
                 }
+
+                if ($error === null) {
+                    foreach ($toSave as $appt) {
+                        save_appointment($appt);
+                    }
+                }
+            } finally {
+                flock($lock, LOCK_UN);
+                fclose($lock);
             }
-            store_write('subscriptions', $subs);
         }
 
-        $clientUser = find_user_by_id($clientId);
-        if ($clientUser) {
-            login_client($clientUser);
+        if ($error === null) {
+            if (!empty($booking['from_plan']) && !empty($booking['subscription_id'])) {
+                $subs = store_read('subscriptions');
+                foreach ($subs as $i => $row) {
+                    if ((int)$row['id'] === (int)$booking['subscription_id']) {
+                        $subs[$i]['usage_count'] = (int)($row['usage_count'] ?? 0) + 1;
+                        break;
+                    }
+                }
+                store_write('subscriptions', $subs);
+            }
+
+            $clientUser = find_user_by_id($clientId);
+            if ($clientUser) {
+                login_client($clientUser);
+            }
+            unset($_SESSION['booking'], $_SESSION['plan_booking']);
+            flash('success', 'Agendamento confirmado!');
+            redirect(url('cliente/sucesso.php'));
         }
-        unset($_SESSION['booking'], $_SESSION['plan_booking']);
-        flash('success', 'Agendamento confirmado!');
-        redirect(url('cliente/sucesso.php'));
     }
 }
 
