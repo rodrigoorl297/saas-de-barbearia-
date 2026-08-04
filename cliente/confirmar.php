@@ -75,6 +75,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm'])) {
                     'active' => 1,
                 ]);
                 $clientId = (int)$client['id'];
+
+                $refCode = trim((string)($_POST['referral_code'] ?? ''));
+                if ($refCode !== '') {
+                    loyalty_register_referral($phone, $name, $refCode);
+                }
             }
         }
     }
@@ -195,6 +200,13 @@ $backUrl = !empty($booking['from_plan'])
         </div>
         <small style="opacity:.7;font-size:12px">Use essa senha depois em “Ver mais” no histórico.</small>
       </div>
+      <?php if (loyalty_referral_bonus() > 0): ?>
+        <div class="telefone-cliente">
+          <label>Código de indicação (opcional)</label>
+          <input class="input-telefone" type="text" name="referral_code" maxlength="12" placeholder="Ex: JOAO3" value="<?= e($_POST['referral_code'] ?? '') ?>" style="text-transform:uppercase">
+          <small style="opacity:.7;font-size:12px">Veio por indicação de um amigo? Vocês dois ganham <?= loyalty_referral_bonus() ?> pontos.</small>
+        </div>
+      <?php endif; ?>
       <button class="btn-confirmar" type="submit">Confirmar agendamento</button>
     <?php endif; ?>
   </form>

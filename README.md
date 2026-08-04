@@ -120,6 +120,28 @@ em..." na conta dele, mas o cartão nunca é cobrado de novo automaticamente.
 
 ---
 
+## Programa de fidelidade
+
+Configurado em **Dono > Fidelidade**: pontos por R$ gasto, faixas de nível
+(Bronze/Prata/Ouro), multiplicador de pontos por nível e recompensas resgatáveis.
+O cliente acompanha pontos, nível, progresso e recompensas em **Conta**.
+
+Três mecânicas dependem de um cron diário (todas opcionais — com os campos zerados
+em *Regras do programa*, o script não faz nada):
+
+```bash
+# crontab da hospedagem, uma vez ao dia
+0 7 * * * php /caminho/do/site/cron/fidelidade-diaria.php >> /caminho/do/site/data/cron.log 2>&1
+```
+
+| Mecânica | Como funciona |
+|---|---|
+| Aniversário | Credita os pontos no dia, uma vez por ano, para clientes com data de nascimento cadastrada |
+| Expiração | Zera pontos após N dias sem pontuar e avisa o cliente 15 dias antes |
+| Indicação | Não usa cron: o código sai na Conta do cliente e o bônus cai para os dois lados quando o indicado conclui o 1º atendimento |
+
+---
+
 ## Modelo de venda
 
 - **1 barbearia = 1 instalação** (ZIP / FTP)
@@ -194,4 +216,5 @@ Não há um router de verdade. `router.php` só existe para dar uma URL bonita
 | Integração Mercado Pago | `includes/mercadopago.php` |
 | Integração WhatsApp | `includes/whatsapp.php` |
 | Cobrança recorrente (cron) | `cron/cobrar-renovacoes.php` |
+| Rotinas de fidelidade (cron) | `cron/fidelidade-diaria.php` |
 | Schema MySQL | `sql/barbearia_schema.sql` |

@@ -7,14 +7,31 @@ $user = require_role(['dono']);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'adjust';
 
+    // Preserva busca/filtro ativos ao voltar para a lista
+    $backParams = [];
+    if (trim((string)($_POST['q'] ?? '')) !== '') {
+        $backParams['q'] = trim((string)$_POST['q']);
+    }
+    if (in_array((string)($_POST['tier'] ?? ''), ['Bronze', 'Prata', 'Ouro'], true)) {
+        $backParams['tier'] = (string)$_POST['tier'];
+    }
+    $backUrl = url('dono/fidelidade.php') . ($backParams ? '?' . http_build_query($backParams) : '');
+
     if ($action === 'save_rules') {
         $pointsPerReal = max(0, (float)str_replace(',', '.', (string)($_POST['points_per_real'] ?? 1)));
         $prata = max(1, (int)($_POST['prata_min'] ?? 100));
         $ouro = max($prata + 1, (int)($_POST['ouro_min'] ?? 200));
+        $multPrata = max(1, (float)str_replace(',', '.', (string)($_POST['mult_prata'] ?? 1)));
+        $multOuro = max($multPrata, (float)str_replace(',', '.', (string)($_POST['mult_ouro'] ?? 1)));
         save_settings([
             'loyalty_points_per_real' => $pointsPerReal,
             'loyalty_prata_min' => $prata,
             'loyalty_ouro_min' => $ouro,
+            'loyalty_mult_prata' => $multPrata,
+            'loyalty_mult_ouro' => $multOuro,
+            'loyalty_expire_days' => max(0, (int)($_POST['expire_days'] ?? 0)),
+            'loyalty_birthday_bonus' => max(0, (int)($_POST['birthday_bonus'] ?? 0)),
+            'loyalty_referral_bonus' => max(0, (int)($_POST['referral_bonus'] ?? 0)),
         ]);
         $rows = store_read('loyalty');
         foreach ($rows as $i => $r) {
@@ -66,18 +83,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         $qty = max(1, (int)($_POST['points'] ?? 0));
         $sign = ($_POST['op'] ?? 'add') === 'sub' ? -1 : 1;
+        $reasonInput = trim((string)($_POST['reason'] ?? ''));
         $member = find_loyalty_member($id);
         if ($member) {
             loyalty_add_points(
                 (string)$member['client_phone'],
                 (string)$member['client_name'],
                 $qty * $sign,
-                'Ajuste manual do dono',
-                ['type' => 'manual']
+                $reasonInput !== '' ? 'Ajuste: ' . $reasonInput : 'Ajuste manual',
+                ['type' => 'manual', 'by' => (string)($user['name'] ?? 'dono')]
             );
             flash('success', 'Pontos atualizados.');
         }
-        redirect(url('dono/fidelidade.php'));
+        redirect($backUrl);
     }
 
     if ($action === 'redeem') {
@@ -101,18 +119,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (string)$member['client_name'],
                 -(int)$reward['cost'],
                 'Resgate: ' . $reward['name'],
-                ['type' => 'resgate', 'reward_id' => $rewardId]
+                ['type' => 'resgate', 'reward_id' => $rewardId, 'by' => (string)($user['name'] ?? 'dono')]
             );
             flash('success', 'Resgate registrado: ' . $reward['name']);
         }
-        redirect(url('dono/fidelidade.php'));
+        redirect($backUrl);
     }
 
     redirect(url('dono/fidelidade.php'));
 }
 
-$members = store_read('loyalty');
-usort($members, fn($a, $b) => (int)$b['points'] <=> (int)$a['points']);
+$allMembers = store_read('loyalty');
+usort($allMembers, fn($a, $b) => (int)$b['points'] <=> (int)$a['points']);
+
+// KPIs do mês corrente (a partir do histórico de lançamentos)
+$monthKey = date('Y-m');
+$monthEarned = 0;
+$monthRedeemCount = 0;
+$monthRedeemPts = 0;
+foreach ($allMembers as $m) {
+    foreach (($m['history'] ?? []) as $h) {
+        if (substr((string)($h['date'] ?? ''), 0, 7) !== $monthKey) {
+            continue;
+        }
+        $delta = (int)($h['delta'] ?? 0);
+        if (($h['type'] ?? '') === 'resgate') {
+            $monthRedeemCount++;
+            $monthRedeemPts += -$delta;
+        } elseif ($delta > 0) {
+            $monthEarned += $delta;
+        }
+    }
+}
+
+// Busca e filtro por nível
+$q = trim((string)($_GET['q'] ?? ''));
+$tierFilter = in_array((string)($_GET['tier'] ?? ''), ['Bronze', 'Prata', 'Ouro'], true) ? (string)$_GET['tier'] : '';
+$members = $allMembers;
+if ($q !== '') {
+    $qDigits = preg_replace('/\D+/', '', $q);
+    $members = array_values(array_filter($members, function ($m) use ($q, $qDigits) {
+        if (stripos((string)($m['client_name'] ?? ''), $q) !== false) {
+            return true;
+        }
+        return $qDigits !== '' && strpos(preg_replace('/\D+/', '', (string)($m['client_phone'] ?? '')), $qDigits) !== false;
+    }));
+}
+if ($tierFilter !== '') {
+    $members = array_values(array_filter($members, fn($m) => ($m['tier'] ?? 'Bronze') === $tierFilter));
+}
 
 $rewards = loyalty_rewards();
 usort($rewards, fn($a, $b) => (int)$a['cost'] <=> (int)$b['cost']);
@@ -135,8 +190,10 @@ if (isset($_GET['edit_reward'])) {
 admin_layout_start('Fidelidade', 'dono', 'fidelidade');
 ?>
 <div class="row g-3 mb-3">
-  <div class="col-md-4"><div class="card-soft kpi"><div class="label">Membros</div><div class="value"><?= count($members) ?></div></div></div>
-  <div class="col-md-4"><div class="card-soft kpi"><div class="label">Pontos totais</div><div class="value"><?= array_sum(array_column($members, 'points')) ?></div></div></div>
+  <div class="col-6 col-md-3"><div class="card-soft kpi"><div class="label">Membros</div><div class="value"><?= count($allMembers) ?></div></div></div>
+  <div class="col-6 col-md-3"><div class="card-soft kpi"><div class="label">Pontos em aberto</div><div class="value"><?= array_sum(array_column($allMembers, 'points')) ?></div><div class="small text-secondary">saldo a resgatar</div></div></div>
+  <div class="col-6 col-md-3"><div class="card-soft kpi"><div class="label">Pontos ganhos no mês</div><div class="value"><?= $monthEarned ?></div></div></div>
+  <div class="col-6 col-md-3"><div class="card-soft kpi"><div class="label">Resgates no mês</div><div class="value"><?= $monthRedeemCount ?></div><div class="small text-secondary"><?= $monthRedeemPts ?> pts resgatados</div></div></div>
 </div>
 
 <div class="row g-3 mb-3">
@@ -158,6 +215,41 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
           <label class="form-label small mb-1">Nível Ouro a partir de</label>
           <input type="number" min="1" name="ouro_min" class="form-control form-control-sm" value="<?= (int)$thresholds['ouro'] ?>">
         </div>
+        <div class="col-6">
+          <label class="form-label small mb-1">Bônus Prata (multiplicador)</label>
+          <input type="number" step="0.1" min="1" name="mult_prata" class="form-control form-control-sm" value="<?= e((string)loyalty_tier_multiplier('Prata')) ?>">
+        </div>
+        <div class="col-6">
+          <label class="form-label small mb-1">Bônus Ouro (multiplicador)</label>
+          <input type="number" step="0.1" min="1" name="mult_ouro" class="form-control form-control-sm" value="<?= e((string)loyalty_tier_multiplier('Ouro')) ?>">
+        </div>
+        <div class="col-12">
+          <div class="form-text">Ex.: 1,2 = cliente do nível ganha 20% a mais de pontos. Use 1 para desativar o bônus.</div>
+        </div>
+
+        <div class="col-12"><hr class="my-1 opacity-25"></div>
+        <div class="col-12">
+          <div class="small fw-bold mb-1">Engajamento <span class="text-secondary fw-normal">(0 = desativado)</span></div>
+        </div>
+        <div class="col-4">
+          <label class="form-label small mb-1">Pontos de aniversário</label>
+          <input type="number" min="0" name="birthday_bonus" class="form-control form-control-sm" value="<?= loyalty_birthday_bonus() ?>">
+        </div>
+        <div class="col-4">
+          <label class="form-label small mb-1">Pontos por indicação</label>
+          <input type="number" min="0" name="referral_bonus" class="form-control form-control-sm" value="<?= loyalty_referral_bonus() ?>">
+        </div>
+        <div class="col-4">
+          <label class="form-label small mb-1">Expirar após (dias)</label>
+          <input type="number" min="0" name="expire_days" class="form-control form-control-sm" value="<?= loyalty_expire_days() ?>">
+        </div>
+        <div class="col-12">
+          <div class="form-text">
+            Indicação: os dois lados ganham quando o indicado conclui o 1º atendimento.
+            Aniversário e expiração dependem do cron diário (<code>cron/fidelidade-diaria.php</code>).
+          </div>
+        </div>
+
         <div class="col-12 pt-2">
           <button class="btn btn-accent btn-sm" type="submit">Salvar regras</button>
         </div>
@@ -198,8 +290,33 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
 </div>
 
 <div class="card-soft p-3">
-  <?php if (!$members): ?>
+  <?php if (!$allMembers): ?>
     <p class="small text-secondary mb-0">Nenhum cliente no programa de fidelidade ainda.</p>
+  <?php else: ?>
+  <form method="get" class="row g-2 align-items-center mb-3">
+    <div class="col-12 col-md-4">
+      <input name="q" class="form-control form-control-sm" placeholder="Buscar por nome ou telefone" value="<?= e($q) ?>">
+    </div>
+    <div class="col-auto">
+      <select name="tier" class="form-select form-select-sm">
+        <option value="">Todos os níveis</option>
+        <?php foreach (['Bronze', 'Prata', 'Ouro'] as $t): ?>
+          <option value="<?= $t ?>" <?= $tierFilter === $t ? 'selected' : '' ?>><?= $t ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-sm btn-accent" type="submit">Filtrar</button>
+      <?php if ($q !== '' || $tierFilter !== ''): ?>
+        <a class="btn btn-sm btn-ghost" href="<?= e(url('dono/fidelidade.php')) ?>">Limpar</a>
+      <?php endif; ?>
+    </div>
+    <?php if ($q !== '' || $tierFilter !== ''): ?>
+      <div class="col-auto small text-secondary"><?= count($members) ?> de <?= count($allMembers) ?> membros</div>
+    <?php endif; ?>
+  </form>
+  <?php if (!$members): ?>
+    <p class="small text-secondary mb-0">Nenhum cliente encontrado com esses filtros.</p>
   <?php else: ?>
   <div class="table-responsive">
     <table class="table table-darkish align-middle mb-0">
@@ -222,26 +339,40 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
               default => 'bronze',
           };
           $history = array_reverse($m['history'] ?? []);
+          $next = loyalty_next_tier_info((int)($m['points'] ?? 0));
       ?>
         <tr>
           <td><?= e($m['client_name']) ?></td>
           <td><?= e($m['client_phone']) ?></td>
           <td><?= (int)$m['points'] ?></td>
-          <td><span class="badge badge-tier <?= $tierClass ?>"><?= e($m['tier']) ?></span></td>
+          <td>
+            <span class="badge badge-tier <?= $tierClass ?>"><?= e($m['tier']) ?></span>
+            <?php if ($next): ?>
+              <div class="tier-mini-progress" title="Faltam <?= (int)$next['missing'] ?> pts para <?= e($next['tier']) ?>">
+                <div class="tier-mini-bar"><i style="width:<?= (int)$next['percent'] ?>%"></i></div>
+                <span class="tier-mini-label">-<?= (int)$next['missing'] ?> p/ <?= e($next['tier']) ?></span>
+              </div>
+            <?php endif; ?>
+          </td>
           <td>
             <form method="post" class="d-flex gap-1 align-items-center">
               <input type="hidden" name="action" value="adjust">
               <input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
+              <input type="hidden" name="q" value="<?= e($q) ?>">
+              <input type="hidden" name="tier" value="<?= e($tierFilter) ?>">
               <input type="number" name="points" class="form-control form-control-sm" style="width:64px" value="10" min="1">
+              <input type="text" name="reason" class="form-control form-control-sm" style="width:120px" placeholder="Motivo" maxlength="80">
               <button class="btn btn-sm btn-outline-success" type="submit" name="op" value="add" title="Adicionar pontos">+</button>
-              <button class="btn btn-sm btn-outline-danger" type="submit" name="op" value="sub" title="Remover pontos">&minus;</button>
+              <button class="btn btn-sm btn-outline-danger" type="submit" name="op" value="sub" title="Remover pontos" onclick="return confirm('Remover pontos deste cliente?')">&minus;</button>
             </form>
           </td>
           <td>
             <?php if ($activeRewards): ?>
-              <form method="post" class="d-flex gap-1">
+              <form method="post" class="d-flex gap-1" onsubmit="return confirm('Confirmar resgate: ' + this.reward_id.selectedOptions[0].text.trim() + '? Os pontos serão debitados.')">
                 <input type="hidden" name="action" value="redeem">
                 <input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
+                <input type="hidden" name="q" value="<?= e($q) ?>">
+                <input type="hidden" name="tier" value="<?= e($tierFilter) ?>">
                 <select name="reward_id" class="form-select form-select-sm" style="width:150px">
                   <?php foreach ($activeRewards as $r): ?>
                     <option value="<?= (int)$r['id'] ?>" <?= (int)$m['points'] < (int)$r['cost'] ? 'disabled' : '' ?>><?= e($r['name']) ?> &middot; <?= (int)$r['cost'] ?>p</option>
@@ -273,6 +404,9 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
                     <strong class="<?= $delta >= 0 ? 'text-success' : 'text-danger' ?>"><?= $delta >= 0 ? '+' : '' ?><?= $delta ?></strong>
                     &middot;
                     <?= e((string)($h['reason'] ?? '')) ?>
+                    <?php if (!empty($h['by'])): ?>
+                      <span class="text-secondary">&middot; por <?= e((string)$h['by']) ?></span>
+                    <?php endif; ?>
                   </li>
                 <?php endforeach; ?>
               </ul>
@@ -284,7 +418,16 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
     </table>
   </div>
   <?php endif; ?>
-  <p class="small text-secondary mt-3 mb-0">Bronze &lt; <?= (int)$thresholds['prata'] ?> &middot; Prata <?= (int)$thresholds['prata'] ?>+ &middot; Ouro <?= (int)$thresholds['ouro'] ?>+</p>
+  <?php endif; ?>
+  <?php
+    $multPrata = loyalty_tier_multiplier('Prata');
+    $multOuro = loyalty_tier_multiplier('Ouro');
+  ?>
+  <p class="small text-secondary mt-3 mb-0">
+    Bronze &lt; <?= (int)$thresholds['prata'] ?>
+    &middot; Prata <?= (int)$thresholds['prata'] ?>+<?= $multPrata > 1 ? ' (pontos ' . e(loyalty_format_mult($multPrata)) . 'x)' : '' ?>
+    &middot; Ouro <?= (int)$thresholds['ouro'] ?>+<?= $multOuro > 1 ? ' (pontos ' . e(loyalty_format_mult($multOuro)) . 'x)' : '' ?>
+  </p>
 </div>
 
 <div class="modal fade" id="rewardModal" tabindex="-1" aria-hidden="true">

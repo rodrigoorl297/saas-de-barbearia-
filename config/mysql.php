@@ -176,12 +176,12 @@ function db_row_from_sql(string $logical, array $row): array
     if (isset($row['id'])) {
         $row['id'] = (int)$row['id'];
     }
-    foreach (['active', 'qty', 'min_qty', 'duration_min', 'sort_order', 'slot_minutes', 'lunch_enabled', 'setup_completed', 'loyalty_prata_min', 'loyalty_ouro_min'] as $k) {
+    foreach (['active', 'qty', 'min_qty', 'duration_min', 'sort_order', 'slot_minutes', 'lunch_enabled', 'setup_completed', 'loyalty_prata_min', 'loyalty_ouro_min', 'loyalty_expire_days', 'loyalty_birthday_bonus', 'loyalty_referral_bonus'] as $k) {
         if (array_key_exists($k, $row) && $row[$k] !== null) {
             $row[$k] = (int)$row[$k];
         }
     }
-    foreach (['price', 'cost', 'amount', 'commission_rate', 'target', 'loyalty_points_per_real'] as $k) {
+    foreach (['price', 'cost', 'amount', 'commission_rate', 'target', 'loyalty_points_per_real', 'loyalty_mult_prata', 'loyalty_mult_ouro'] as $k) {
         if (array_key_exists($k, $row) && $row[$k] !== null) {
             $row[$k] = (float)$row[$k];
         }
@@ -246,13 +246,17 @@ function db_upsert_settings(PDO $pdo, array $row): void
         primary_color, accent_color, open_time, close_time, lunch_start, lunch_end,
         slot_minutes, lunch_enabled, commission_rate, setup_completed,
         mp_public_key, mp_access_token, wa_phone_number_id, wa_access_token,
-        loyalty_prata_min, loyalty_ouro_min, loyalty_points_per_real, loyalty_rewards_json
+        loyalty_prata_min, loyalty_ouro_min, loyalty_points_per_real, loyalty_rewards_json,
+        loyalty_mult_prata, loyalty_mult_ouro, loyalty_expire_days,
+        loyalty_birthday_bonus, loyalty_referral_bonus
       ) VALUES (
         1, :shop_name, :slug, :phone, :address, :instagram, :maps_url, :logo_url,
         :primary_color, :accent_color, :open_time, :close_time, :lunch_start, :lunch_end,
         :slot_minutes, :lunch_enabled, :commission_rate, :setup_completed,
         :mp_public_key, :mp_access_token, :wa_phone_number_id, :wa_access_token,
-        :loyalty_prata_min, :loyalty_ouro_min, :loyalty_points_per_real, :loyalty_rewards_json
+        :loyalty_prata_min, :loyalty_ouro_min, :loyalty_points_per_real, :loyalty_rewards_json,
+        :loyalty_mult_prata, :loyalty_mult_ouro, :loyalty_expire_days,
+        :loyalty_birthday_bonus, :loyalty_referral_bonus
       )';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
@@ -283,6 +287,11 @@ function db_upsert_settings(PDO $pdo, array $row): void
         ':loyalty_rewards_json' => isset($row['loyalty_rewards_json'])
             ? (is_string($row['loyalty_rewards_json']) ? $row['loyalty_rewards_json'] : json_encode($row['loyalty_rewards_json'], JSON_UNESCAPED_UNICODE))
             : '[]',
+        ':loyalty_mult_prata' => (float)($row['loyalty_mult_prata'] ?? 1),
+        ':loyalty_mult_ouro' => (float)($row['loyalty_mult_ouro'] ?? 1),
+        ':loyalty_expire_days' => (int)($row['loyalty_expire_days'] ?? 0),
+        ':loyalty_birthday_bonus' => (int)($row['loyalty_birthday_bonus'] ?? 0),
+        ':loyalty_referral_bonus' => (int)($row['loyalty_referral_bonus'] ?? 0),
     ]);
 }
 
@@ -570,6 +579,19 @@ function db_install_schema_if_needed(): void
                 ADD COLUMN loyalty_ouro_min INT NOT NULL DEFAULT 200,
                 ADD COLUMN loyalty_points_per_real DECIMAL(6,2) NOT NULL DEFAULT 1.00,
                 ADD COLUMN loyalty_rewards_json JSON NULL");
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM configuracoes LIKE 'loyalty_mult_prata'")->fetch();
+        if (!$cols) {
+            $pdo->exec("ALTER TABLE configuracoes
+                ADD COLUMN loyalty_mult_prata DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+                ADD COLUMN loyalty_mult_ouro DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+                ADD COLUMN loyalty_expire_days INT NOT NULL DEFAULT 0,
+                ADD COLUMN loyalty_birthday_bonus INT NOT NULL DEFAULT 0,
+                ADD COLUMN loyalty_referral_bonus INT NOT NULL DEFAULT 0");
         }
     } catch (Throwable $e) {
         // ignore
