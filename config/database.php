@@ -541,9 +541,341 @@ function loyalty_tier_for_points(int $points): string
     return 'Bronze';
 }
 
+/**
+ * Próximo nível do cliente e quanto falta para alcançá-lo.
+ * Retorna null quando já está no nível máximo (Ouro).
+ */
+function loyalty_next_tier_info(int $points): ?array
+{
+    $t = loyalty_thresholds();
+    if ($points >= $t['ouro']) {
+        return null;
+    }
+    $target = $points >= $t['prata'] ? 'Ouro' : 'Prata';
+    $min = $target === 'Ouro' ? $t['ouro'] : $t['prata'];
+    $base = $target === 'Ouro' ? $t['prata'] : 0;
+    $range = max(1, $min - $base);
+    return [
+        'tier' => $target,
+        'min' => $min,
+        'missing' => $min - $points,
+        'percent' => (int)round(min(100, max(0, ($points - $base) / $range * 100))),
+    ];
+}
+
 function loyalty_points_per_real(): float
 {
     return max(0, (float)(settings()['loyalty_points_per_real'] ?? 1));
+}
+
+/**
+ * Multiplicador de pontos do nível (benefício configurável nas regras).
+ * Bronze é sempre 1x; use 1 nos demais para desativar o bônus.
+ */
+function loyalty_tier_multiplier(string $tier): float
+{
+    $cfg = settings();
+    return match ($tier) {
+        'Ouro' => max(1.0, (float)($cfg['loyalty_mult_ouro'] ?? 1)),
+        'Prata' => max(1.0, (float)($cfg['loyalty_mult_prata'] ?? 1)),
+        default => 1.0,
+    };
+}
+
+/** Formata multiplicador para exibição: 1.5 -> "1,5". */
+function loyalty_format_mult(float $mult): string
+{
+    return rtrim(rtrim(number_format($mult, 2, ',', '.'), '0'), ',');
+}
+
+/** Dias de inatividade até os pontos expirarem. 0 = nunca expira. */
+function loyalty_expire_days(): int
+{
+    return max(0, (int)(settings()['loyalty_expire_days'] ?? 0));
+}
+
+/** Pontos de presente no aniversário. 0 = desativado. */
+function loyalty_birthday_bonus(): int
+{
+    return max(0, (int)(settings()['loyalty_birthday_bonus'] ?? 0));
+}
+
+/** Pontos para quem indica e para o indicado. 0 = desativado. */
+function loyalty_referral_bonus(): int
+{
+    return max(0, (int)(settings()['loyalty_referral_bonus'] ?? 0));
+}
+
+/** Cria um aviso no app do cliente (aparece em Conta > Notificações). */
+function loyalty_notify(string $phone, string $title, string $message): void
+{
+    $client = find_client_by_phone($phone);
+    if (!$client) {
+        return;
+    }
+    $notifs = store_read('notifications');
+    $nextId = 1;
+    foreach ($notifs as $n) {
+        $nextId = max($nextId, (int)($n['id'] ?? 0) + 1);
+    }
+    $notifs[] = [
+        'id' => $nextId,
+        'client_id' => (int)$client['id'],
+        'campaign_id' => 0,
+        'type' => 'fidelidade',
+        'title' => $title,
+        'message' => $message,
+        'read' => 0,
+        'created_at' => date('c'),
+    ];
+    store_write('notifications', $notifs);
+}
+
+/**
+ * Código de indicação do cliente: apelido + id em base36 (ex.: JOAO-2X).
+ * O que identifica o dono é o sufixo depois do traço, então trocar o nome
+ * no perfil não invalida um código já compartilhado.
+ */
+function loyalty_referral_code_for_client(array $client): string
+{
+    $first = trim((string)(preg_split('/\s+/', trim((string)($client['name'] ?? '')))[0] ?? ''));
+    // slugify() já trata acentos de pt-BR de forma previsível em qualquer servidor
+    $ascii = $first !== '' ? (string)preg_replace('/[^a-z]/', '', slugify($first)) : '';
+    $prefix = strtoupper(substr($ascii !== '' ? $ascii : 'cli', 0, 4));
+    return $prefix . '-' . strtoupper(base_convert((string)(int)($client['id'] ?? 0), 10, 36));
+}
+
+function find_client_by_referral_code(string $code): ?array
+{
+    $code = strtoupper(trim($code));
+    if (!str_contains($code, '-')) {
+        return null;
+    }
+    $suffix = substr($code, strrpos($code, '-') + 1);
+    if ($suffix === '' || !ctype_alnum($suffix)) {
+        return null;
+    }
+    $id = (int)base_convert(strtolower($suffix), 36, 10);
+    if ($id <= 0) {
+        return null;
+    }
+    $client = find_user_by_id($id);
+    if (!$client || ($client['role'] ?? '') !== 'cliente' || empty($client['phone'])) {
+        return null;
+    }
+    return $client;
+}
+
+/**
+ * Registra que o cliente foi indicado por alguém. O bônus só é creditado
+ * quando ele conclui o primeiro atendimento (evita cadastro falso).
+ */
+function loyalty_register_referral(string $phone, string $name, string $code): bool
+{
+    if (loyalty_referral_bonus() <= 0) {
+        return false;
+    }
+    $phone = preg_replace('/\D+/', '', $phone);
+    $sponsor = find_client_by_referral_code($code);
+    if (!$sponsor || $phone === '') {
+        return false;
+    }
+    // Ninguém indica a si mesmo
+    if (preg_replace('/\D+/', '', (string)($sponsor['phone'] ?? '')) === $phone) {
+        return false;
+    }
+
+    $member = find_loyalty_member_by_phone($phone);
+    // Só vale para cliente novo: sem indicação anterior e sem histórico de pontos
+    if ($member && (!empty($member['referred_by']) || !empty($member['history']))) {
+        return false;
+    }
+    if (!$member) {
+        $member = loyalty_add_points($phone, $name, 0, 'Entrou pelo convite de ' . (string)($sponsor['name'] ?? ''), [
+            'type' => 'indicacao_pendente',
+        ]);
+    }
+
+    $rows = store_read('loyalty');
+    foreach ($rows as $i => $m) {
+        if ((int)($m['id'] ?? 0) === (int)$member['id']) {
+            $rows[$i]['referred_by'] = strtoupper(trim($code));
+            $rows[$i]['referral_paid'] = 0;
+            store_write('loyalty', $rows);
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Paga o bônus de indicação depois do primeiro atendimento concluído. */
+function loyalty_settle_referral(string $phone): void
+{
+    $bonus = loyalty_referral_bonus();
+    if ($bonus <= 0) {
+        return;
+    }
+    $member = find_loyalty_member_by_phone($phone);
+    if (!$member || empty($member['referred_by']) || !empty($member['referral_paid'])) {
+        return;
+    }
+    $sponsor = find_client_by_referral_code((string)$member['referred_by']);
+    if (!$sponsor) {
+        return;
+    }
+
+    // Marca antes de creditar para não pagar duas vezes se algo falhar no meio
+    $rows = store_read('loyalty');
+    foreach ($rows as $i => $m) {
+        if ((int)($m['id'] ?? 0) === (int)$member['id']) {
+            $rows[$i]['referral_paid'] = 1;
+            break;
+        }
+    }
+    store_write('loyalty', $rows);
+
+    $sponsorName = (string)($sponsor['name'] ?? '');
+    $sponsorPhone = preg_replace('/\D+/', '', (string)($sponsor['phone'] ?? ''));
+    $memberName = (string)($member['client_name'] ?? '');
+
+    loyalty_add_points($sponsorPhone, $sponsorName, $bonus, 'Indicação de ' . $memberName, [
+        'type' => 'indicacao',
+    ]);
+    loyalty_add_points($phone, $memberName, $bonus, 'Bônus de boas-vindas (indicado por ' . $sponsorName . ')', [
+        'type' => 'indicacao',
+    ]);
+
+    loyalty_notify($sponsorPhone, 'Você ganhou pontos!', 'Sua indicação para ' . $memberName . ' rendeu ' . $bonus . ' pontos. Continue indicando!');
+    loyalty_notify($phone, 'Bem-vindo ao programa!', 'Você ganhou ' . $bonus . ' pontos de boas-vindas por vir pela indicação de ' . $sponsorName . '.');
+}
+
+/** Data do último ganho de pontos (ISO) ou null se o membro nunca pontuou. */
+function loyalty_last_earn_date(array $member): ?string
+{
+    $last = null;
+    foreach (($member['history'] ?? []) as $h) {
+        if ((int)($h['delta'] ?? 0) <= 0) {
+            continue;
+        }
+        $d = (string)($h['date'] ?? '');
+        if ($d !== '' && ($last === null || $d > $last)) {
+            $last = $d;
+        }
+    }
+    return $last;
+}
+
+/**
+ * Zera os pontos de quem passou do prazo sem pontuar e avisa quem está perto
+ * de perder. Idempotente por dia. Retorna [expirados, avisados].
+ */
+function loyalty_run_expiration(int $warnDays = 15): array
+{
+    $days = loyalty_expire_days();
+    if ($days <= 0) {
+        return [0, 0];
+    }
+
+    $rows = store_read('loyalty');
+    $today = date('Y-m-d');
+    $expired = 0;
+    $warned = 0;
+
+    foreach ($rows as $i => $m) {
+        $points = (int)($m['points'] ?? 0);
+        if ($points <= 0) {
+            continue;
+        }
+        $lastEarn = loyalty_last_earn_date($m);
+        if ($lastEarn === null) {
+            continue; // sem histórico de ganho, não há como medir inatividade
+        }
+        $deadline = strtotime($lastEarn . ' +' . $days . ' days');
+        if ($deadline === false) {
+            continue;
+        }
+
+        if (time() >= $deadline) {
+            $rows[$i]['points'] = 0;
+            $rows[$i]['tier'] = loyalty_tier_for_points(0);
+            $history = $m['history'] ?? [];
+            $history[] = [
+                'date' => date('c'),
+                'delta' => -$points,
+                'reason' => 'Pontos expirados por inatividade',
+                'type' => 'expiracao',
+            ];
+            $rows[$i]['history'] = array_slice($history, -50);
+            $rows[$i]['expire_warned_on'] = null;
+            $expired++;
+            loyalty_notify(
+                (string)($m['client_phone'] ?? ''),
+                'Seus pontos expiraram',
+                'Faz tempo que não nos vemos! Seus ' . $points . ' pontos expiraram, mas é só agendar para começar a acumular de novo.'
+            );
+            continue;
+        }
+
+        $daysLeft = (int)ceil(($deadline - time()) / 86400);
+        if ($daysLeft <= $warnDays && (string)($m['expire_warned_on'] ?? '') !== $today) {
+            $rows[$i]['expire_warned_on'] = $today;
+            $warned++;
+            loyalty_notify(
+                (string)($m['client_phone'] ?? ''),
+                'Seus pontos vão expirar',
+                'Você tem ' . $points . ' pontos que expiram em ' . $daysLeft . ' dia(s). Agende um horário para mantê-los.'
+            );
+        }
+    }
+
+    if ($expired > 0 || $warned > 0) {
+        store_write('loyalty', $rows);
+    }
+    return [$expired, $warned];
+}
+
+/** Credita o presente de aniversário. Uma vez por ano por cliente. */
+function loyalty_run_birthday_bonus(): int
+{
+    $bonus = loyalty_birthday_bonus();
+    if ($bonus <= 0) {
+        return 0;
+    }
+
+    $todayMd = date('m-d');
+    $year = date('Y');
+    $count = 0;
+
+    foreach (store_read('users') as $u) {
+        if (($u['role'] ?? '') !== 'cliente' || empty($u['birth_date']) || empty($u['phone'])) {
+            continue;
+        }
+        if (substr((string)$u['birth_date'], 5, 5) !== $todayMd) {
+            continue;
+        }
+
+        $phone = preg_replace('/\D+/', '', (string)$u['phone']);
+        $member = find_loyalty_member_by_phone($phone);
+
+        $already = false;
+        foreach (($member['history'] ?? []) as $h) {
+            if (($h['type'] ?? '') === 'aniversario' && substr((string)($h['date'] ?? ''), 0, 4) === $year) {
+                $already = true;
+                break;
+            }
+        }
+        if ($already) {
+            continue;
+        }
+
+        loyalty_add_points($phone, (string)($u['name'] ?? ''), $bonus, 'Presente de aniversário', [
+            'type' => 'aniversario',
+        ]);
+        loyalty_notify($phone, 'Feliz aniversário! 🎉', 'Você ganhou ' . $bonus . ' pontos de presente. Aproveite para agendar seu corte!');
+        $count++;
+    }
+
+    return $count;
 }
 
 function loyalty_rewards(): array
@@ -636,15 +968,24 @@ function sync_appointment_loyalty(array $appointment): void
         }
     }
 
-    $points = (int)floor((float)($appointment['price'] ?? 0) * loyalty_points_per_real());
+    $tier = (string)($member['tier'] ?? 'Bronze');
+    $mult = loyalty_tier_multiplier($tier);
+    $points = (int)floor((float)($appointment['price'] ?? 0) * loyalty_points_per_real() * $mult);
     if ($points <= 0) {
         return;
     }
 
-    loyalty_add_points($phone, (string)($appointment['client_name'] ?? ''), $points, 'Agendamento concluído', [
+    $reason = 'Agendamento concluído';
+    if ($mult > 1) {
+        $reason .= ' (bônus ' . $tier . ' ' . loyalty_format_mult($mult) . 'x)';
+    }
+
+    loyalty_add_points($phone, (string)($appointment['client_name'] ?? ''), $points, $reason, [
         'type' => 'agendamento',
         'appointment_id' => $id,
     ]);
+
+    loyalty_settle_referral($phone);
 }
 
 function save_settings(array $data): void

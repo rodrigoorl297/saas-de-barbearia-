@@ -23,6 +23,11 @@ require __DIR__ . '/../includes/whatsapp.php';
 if (!defined('APP_KEY')) {
     define('APP_KEY', base64_encode(str_repeat('k', 32)));
 }
+// Só para satisfazer data_dir(); as funções testadas aqui não leem o disco.
+if (!defined('DB_PATH')) {
+    define('DB_PATH', __DIR__ . '/../data/suprema.db');
+}
+require __DIR__ . '/../config/database.php';
 
 $passed = 0;
 $failed = 0;
@@ -66,6 +71,30 @@ check('status desconhecido é devolvido sem alteração', status_label('xyz') ==
 echo "== wa_mask_phone (log de campanhas) ==\n";
 check('mantém DDI+DDD e os 2 últimos dígitos, mascara o meio', wa_mask_phone('5511987654321') === '5511*******21');
 check('telefone curto vira só asteriscos', wa_mask_phone('999') === '***');
+
+echo "== fidelidade: loyalty_format_mult ==\n";
+check('1.5 vira "1,5"', loyalty_format_mult(1.5) === '1,5');
+check('1.0 vira "1" (sem casas sobrando)', loyalty_format_mult(1.0) === '1');
+check('1.25 mantém as duas casas', loyalty_format_mult(1.25) === '1,25');
+
+echo "== fidelidade: código de indicação ==\n";
+$codeJoao = loyalty_referral_code_for_client(['id' => 7, 'name' => 'João Silva']);
+check('código usa só o primeiro nome + id em base36', $codeJoao === 'JOAO-7');
+check('sobrenome não entra no código', loyalty_referral_code_for_client(['id' => 3, 'name' => 'Ana Souza']) === 'ANA-3');
+check('acentos viram letras simples', loyalty_referral_code_for_client(['id' => 5, 'name' => 'Ção']) === 'CAO-5');
+check('id alto vira base36', loyalty_referral_code_for_client(['id' => 42, 'name' => 'Ana']) === 'ANA-16');
+check('nome vazio usa prefixo genérico', loyalty_referral_code_for_client(['id' => 1, 'name' => '']) === 'CLI-1');
+check('nome trocado não muda o sufixo que identifica o dono', str_ends_with(loyalty_referral_code_for_client(['id' => 7, 'name' => 'Outro Nome']), '-7'));
+
+echo "== fidelidade: loyalty_last_earn_date ==\n";
+$membroComGanhos = ['history' => [
+    ['date' => '2026-01-10T10:00:00-03:00', 'delta' => 10],
+    ['date' => '2026-03-05T10:00:00-03:00', 'delta' => -50],
+    ['date' => '2026-02-20T10:00:00-03:00', 'delta' => 30],
+]];
+check('pega o ganho mais recente, ignorando resgates', loyalty_last_earn_date($membroComGanhos) === '2026-02-20T10:00:00-03:00');
+check('membro só com resgates não tem data de ganho', loyalty_last_earn_date(['history' => [['date' => '2026-03-05T10:00:00-03:00', 'delta' => -50]]]) === null);
+check('membro sem histórico devolve null', loyalty_last_earn_date([]) === null);
 
 echo "== App\\DotEnv ==\n";
 putenv('TEST_BOOL_TRUE=true');

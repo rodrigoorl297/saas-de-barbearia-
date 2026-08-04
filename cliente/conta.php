@@ -59,6 +59,25 @@ $cards = $client ? client_cards((int)$client['id']) : [];
 $charges = $client ? client_charges((int)$client['id']) : [];
 $notifs = $client ? client_notifications((int)$client['id']) : [];
 
+$loyaltyMember = $client ? find_loyalty_member_by_phone((string)($client['phone'] ?? '')) : null;
+$loyaltyPoints = (int)($loyaltyMember['points'] ?? 0);
+$loyaltyTier = (string)($loyaltyMember['tier'] ?? 'Bronze');
+$loyaltyNext = loyalty_next_tier_info($loyaltyPoints);
+$loyaltyPerReal = loyalty_points_per_real();
+$loyaltyRewards = array_values(array_filter(loyalty_rewards(), fn($r) => !empty($r['active'])));
+usort($loyaltyRewards, fn($a, $b) => (int)$a['cost'] <=> (int)$b['cost']);
+// Lançamentos de 0 ponto (ex.: registro de indicação) só interessam à auditoria do dono
+$loyaltyHistory = array_slice(array_values(array_filter(
+    array_reverse($loyaltyMember['history'] ?? []),
+    fn($h) => (int)($h['delta'] ?? 0) !== 0
+)), 0, 5);
+$loyaltyMult = loyalty_tier_multiplier($loyaltyTier);
+$loyaltyNextMult = $loyaltyNext ? loyalty_tier_multiplier($loyaltyNext['tier']) : null;
+$loyaltyReferralBonus = loyalty_referral_bonus();
+$loyaltyReferralCode = ($client && $loyaltyReferralBonus > 0)
+    ? loyalty_referral_code_for_client($client)
+    : '';
+
 render_head('Conta', true);
 client_shell_start('conta');
 ?>
@@ -100,6 +119,105 @@ client_shell_start('conta');
         </div>
       </form>
     </dialog>
+
+    <?php if ($loyaltyPerReal > 0 || $loyaltyMember || $loyaltyReferralCode !== ''): ?>
+      <div class="loyalty-card tier-<?= e(strtolower($loyaltyTier)) ?>">
+        <div class="loyalty-head">
+          <span class="loyalty-ico"><?= icon_svg('star', 20) ?></span>
+          <span class="loyalty-title">Programa de fidelidade</span>
+          <span class="loyalty-tier-badge"><?= e($loyaltyTier) ?></span>
+        </div>
+        <div class="loyalty-points">
+          <strong><?= $loyaltyPoints ?></strong>
+          <span>ponto<?= $loyaltyPoints === 1 ? '' : 's' ?></span>
+        </div>
+        <?php if ($loyaltyNext): ?>
+          <div class="loyalty-progress">
+            <div class="loyalty-bar"><i style="width:<?= (int)$loyaltyNext['percent'] ?>%"></i></div>
+            <div class="loyalty-progress-label">
+              Faltam <strong><?= (int)$loyaltyNext['missing'] ?> pts</strong> para o nível <?= e($loyaltyNext['tier']) ?>
+            </div>
+          </div>
+        <?php else: ?>
+          <div class="loyalty-progress-label">Você está no nível máximo. Continue aproveitando!</div>
+        <?php endif; ?>
+        <?php if ($loyaltyMult > 1): ?>
+          <div class="loyalty-bonus-hint"><?= icon_svg('star', 13) ?> Benefício <?= e($loyaltyTier) ?>: seus pontos valem <?= e(loyalty_format_mult($loyaltyMult)) ?>x</div>
+        <?php endif; ?>
+        <?php if ($loyaltyPerReal > 0): ?>
+          <div class="loyalty-earn-hint">
+            A cada R$ 1 em serviços você ganha <?= e(rtrim(rtrim(number_format($loyaltyPerReal, 1, ',', '.'), '0'), ',')) ?> ponto<?= $loyaltyPerReal > 1 ? 's' : '' ?>.
+            <?php if ($loyaltyNext && $loyaltyNextMult > $loyaltyMult): ?>
+              No nível <?= e($loyaltyNext['tier']) ?> eles passam a valer <?= e(loyalty_format_mult($loyaltyNextMult)) ?>x!
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+
+        <?php if ($loyaltyRewards): ?>
+          <div class="loyalty-rewards">
+            <div class="loyalty-rewards-title"><?= icon_svg('gift', 16) ?> Recompensas</div>
+            <ul>
+              <?php foreach ($loyaltyRewards as $r):
+                  $cost = (int)$r['cost'];
+                  $ok = $loyaltyPoints >= $cost;
+              ?>
+                <li class="<?= $ok ? 'ok' : '' ?>">
+                  <span class="loyalty-reward-name"><?= e($r['name']) ?></span>
+                  <span class="loyalty-reward-status">
+                    <?php if ($ok): ?>
+                      <?= icon_svg('check', 14) ?> Disponível · peça na barbearia
+                    <?php else: ?>
+                      Faltam <?= $cost - $loyaltyPoints ?> pts
+                    <?php endif; ?>
+                  </span>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+        <?php endif; ?>
+
+        <?php if ($loyaltyReferralCode !== ''): ?>
+          <div class="loyalty-referral">
+            <div class="loyalty-referral-title">Indique e ganhe</div>
+            <p>Quem usar seu código no primeiro agendamento garante <strong><?= $loyaltyReferralBonus ?> pts</strong> para vocês dois.</p>
+            <div class="loyalty-code-row">
+              <code id="loyalty-code"><?= e($loyaltyReferralCode) ?></code>
+              <button type="button" class="loyalty-copy-btn" data-code="<?= e($loyaltyReferralCode) ?>">Copiar</button>
+            </div>
+          </div>
+        <?php endif; ?>
+
+        <?php if ($loyaltyHistory): ?>
+          <details class="loyalty-history">
+            <summary>Últimos lançamentos</summary>
+            <ul>
+              <?php foreach ($loyaltyHistory as $h):
+                  $delta = (int)($h['delta'] ?? 0);
+                  $ts = strtotime((string)($h['date'] ?? ''));
+              ?>
+                <li>
+                  <span><?= e($ts ? date('d/m/Y', $ts) : '—') ?> · <?= e((string)($h['reason'] ?? '')) ?></span>
+                  <strong class="<?= $delta >= 0 ? 'pos' : 'neg' ?>"><?= $delta >= 0 ? '+' : '' ?><?= $delta ?></strong>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          </details>
+        <?php endif; ?>
+      </div>
+      <?php if ($loyaltyReferralCode !== ''): ?>
+        <script>
+        document.querySelector('.loyalty-copy-btn')?.addEventListener('click', function () {
+          const code = this.dataset.code || '';
+          const done = () => { this.textContent = 'Copiado!'; setTimeout(() => { this.textContent = 'Copiar'; }, 1500); };
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(code).then(done).catch(done);
+          } else {
+            done();
+          }
+        });
+        </script>
+      <?php endif; ?>
+    <?php endif; ?>
 
     <h2 class="conta-section-title">Seus planos e pacotes:</h2>
 

@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS configuracoes (
   loyalty_ouro_min INT NOT NULL DEFAULT 200,
   loyalty_points_per_real DECIMAL(6,2) NOT NULL DEFAULT 1.00,
   loyalty_rewards_json JSON NULL,
+  loyalty_mult_prata DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+  loyalty_mult_ouro DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+  loyalty_expire_days INT NOT NULL DEFAULT 0,
+  loyalty_birthday_bonus INT NOT NULL DEFAULT 0,
+  loyalty_referral_bonus INT NOT NULL DEFAULT 0,
   updated_at DATETIME NULL ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
