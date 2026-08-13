@@ -75,6 +75,18 @@ function get_flash(): ?array
     return $flash;
 }
 
+/** Token fixo pra chamar scripts/lembretes.php via URL (cron de hospedagem compartilhada). */
+function cron_secret(): string
+{
+    $s = settings();
+    $token = trim((string)($s['cron_secret'] ?? ''));
+    if ($token === '') {
+        $token = bin2hex(random_bytes(16));
+        save_settings(['cron_secret' => $token]);
+    }
+    return $token;
+}
+
 function settings(bool $reload = false): array
 {
     static $settings = null;
@@ -467,12 +479,28 @@ function appointments_enriched(?callable $filter = null): array
 function available_slots(int $barberId, string $date, int $durationMin = 60): array
 {
     $cfg = settings();
+
+    $blocked = trim((string)($cfg['blocked_days'] ?? ''));
+    if ($blocked !== '') {
+        $blockedList = explode(',', $blocked);
+        if (in_array($date, $blockedList, true)) {
+            return [];
+        }
+    }
+
     $barber = find_user_by_id($barberId);
-    
+    if (!$barber || ($barber['role'] ?? '') !== 'barbeiro') {
+        return [];
+    }
+
     // Verifica dia de trabalho
     $dayOfWeek = (int)date('w', strtotime($date));
     $workDays = $barber['work_days'] ?? [1,2,3,4,5,6];
-    if (!in_array($dayOfWeek, $workDays)) {
+    if (is_string($workDays)) {
+        $decoded = json_decode($workDays, true);
+        $workDays = is_array($decoded) ? $decoded : [1,2,3,4,5,6];
+    }
+    if (!is_array($workDays) || !in_array($dayOfWeek, $workDays, true)) {
         return [];
     }
 
@@ -576,6 +604,35 @@ function upsert_client(array $data): array
 }
 
 /**
+ * Cliente já tem horário no dia? (agendado/confirmado/concluído bloqueiam; cancelado/faltou liberam).
+ */
+function client_already_booked_on_date(int $clientId, string $date, string $phone = ''): bool
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return false;
+    }
+    $phone = preg_replace('/\D+/', '', $phone);
+    $blocking = ['agendado', 'confirmado', 'concluido'];
+
+    foreach (store_read('appointments') as $a) {
+        if (($a['date'] ?? '') !== $date) {
+            continue;
+        }
+        if (!in_array((string)($a['status'] ?? ''), $blocking, true)) {
+            continue;
+        }
+        $sameId = $clientId > 0 && (int)($a['client_id'] ?? 0) === $clientId;
+        $samePhone = $phone !== ''
+            && preg_replace('/\D+/', '', (string)($a['client_phone'] ?? '')) === $phone;
+        if ($sameId || $samePhone) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Agenda serviço para um cliente. Retorna o agendamento ou mensagem de erro.
  * @return array|string
  */
@@ -599,6 +656,11 @@ function book_service_for_client(int $clientId, int $barberId, int $serviceId, s
     $time = normalize_time($time, '');
     if ($time === '') {
         return 'Horário inválido.';
+    }
+
+    $phone = preg_replace('/\D+/', '', (string)($client['phone'] ?? ''));
+    if (client_already_booked_on_date($clientId, $date, $phone)) {
+        return 'Este cliente já tem agendamento neste dia. Só é permitido um horário por dia.';
     }
 
     $duration = max(15, (int)($service['duration_min'] ?? 30));

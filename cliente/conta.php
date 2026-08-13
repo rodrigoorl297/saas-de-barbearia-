@@ -59,6 +59,14 @@ $cards = $client ? client_cards((int)$client['id']) : [];
 $charges = $client ? client_charges((int)$client['id']) : [];
 $notifs = $client ? client_notifications((int)$client['id']) : [];
 
+$loyaltyMember = $client ? find_loyalty_member_by_phone((string)($client['phone'] ?? '')) : null;
+$loyaltyPoints = (int)($loyaltyMember['points'] ?? 0);
+$loyaltyTier = loyalty_tier_for_points($loyaltyPoints);
+$loyaltyThresholds = loyalty_thresholds();
+$loyaltyNextMin = $loyaltyTier === 'Bronze' ? $loyaltyThresholds['prata']
+    : ($loyaltyTier === 'Prata' ? $loyaltyThresholds['ouro'] : null);
+$loyaltyRewards = array_values(array_filter(loyalty_rewards(), fn($r) => !empty($r['active'])));
+
 render_head('Conta', true);
 client_shell_start('conta');
 ?>
@@ -220,6 +228,54 @@ client_shell_start('conta');
                 </form>
               </div>
             </dialog>
+          <?php endif; ?>
+        </div>
+      </details>
+
+      <details class="conta-acc" id="fidelidade" open>
+        <summary>
+          <span class="acc-ico">⭐</span>
+          <span>Fidelidade</span>
+          <span class="acc-chev"><?= icon_svg('chevron', 16) ?></span>
+        </summary>
+        <div class="acc-body">
+          <div class="loyalty-tier-row">
+            <span class="loyalty-tier-badge tier-<?= e(strtolower($loyaltyTier)) ?>"><?= e($loyaltyTier) ?></span>
+            <strong><?= $loyaltyPoints ?> pontos</strong>
+          </div>
+          <?php if ($loyaltyNextMin !== null):
+            $need = max(0, $loyaltyNextMin - $loyaltyPoints);
+            $prevMin = $loyaltyTier === 'Bronze' ? 0 : $loyaltyThresholds['prata'];
+            $span = max(1, $loyaltyNextMin - $prevMin);
+            $progress = $loyaltyPoints - $prevMin;
+            $pct = min(100, max(0, (int)round($progress / $span * 100)));
+          ?>
+            <div class="plan-usage-bar" style="margin:8px 0"><i style="width:<?= $pct ?>%"></i></div>
+            <p class="page-sub" style="margin:0 0 12px"><?= $need ?> pontos pro próximo nível.</p>
+          <?php else: ?>
+            <p class="page-sub" style="margin:0 0 12px">Você está no nível máximo 🎉</p>
+          <?php endif; ?>
+
+          <?php if (!$loyaltyRewards): ?>
+            <p class="page-sub" style="margin:0">Nenhuma recompensa cadastrada ainda.</p>
+          <?php else: ?>
+            <ul class="charge-timeline">
+              <?php foreach ($loyaltyRewards as $r):
+                  $cost = (int)($r['cost'] ?? 0);
+                  $unlocked = $loyaltyPoints >= $cost;
+              ?>
+                <li>
+                  <div class="charge-dot" style="<?= $unlocked ? '' : 'opacity:.35' ?>"></div>
+                  <div class="charge-main">
+                    <strong style="<?= $unlocked ? '' : 'opacity:.5' ?>"><?= e($r['name'] ?? 'Recompensa') ?></strong>
+                    <div class="page-sub" style="margin:0"><?= $unlocked ? 'Disponível — resgate na barbearia' : 'Faltam ' . ($cost - $loyaltyPoints) . ' pontos' ?></div>
+                  </div>
+                  <div class="charge-side">
+                    <strong><?= $cost ?> pts</strong>
+                  </div>
+                </li>
+              <?php endforeach; ?>
+            </ul>
           <?php endif; ?>
         </div>
       </details>

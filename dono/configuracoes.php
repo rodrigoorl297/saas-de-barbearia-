@@ -23,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'address' => trim($_POST['address'] ?? ''),
         'instagram' => trim($_POST['instagram'] ?? ''),
         'maps_url' => trim($_POST['maps_url'] ?? ''),
+        'google_my_business_url' => trim($_POST['google_my_business_url'] ?? ''),
         'open_time' => normalize_time($_POST['open_time'] ?? '08:00', '08:00'),
         'close_time' => normalize_time($_POST['close_time'] ?? '20:00', '20:00'),
         'lunch_enabled' => isset($_POST['lunch_enabled']) ? 1 : 0,
@@ -31,8 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'slot_minutes' => max(15, (int)($_POST['slot_minutes'] ?? 60)),
         'mp_public_key' => trim($_POST['mp_public_key'] ?? ''),
         'mp_access_token' => trim($_POST['mp_access_token'] ?? ''),
-        'wa_phone_number_id' => trim($_POST['wa_phone_number_id'] ?? ''),
-        'wa_access_token' => trim($_POST['wa_access_token'] ?? ''),
+        'evo_api_url' => trim($_POST['evo_api_url'] ?? ''),
+        'evo_api_key' => trim($_POST['evo_api_key'] ?? ''),
+        'evo_instance' => trim($_POST['evo_instance'] ?? ''),
+        'blocked_days' => trim($_POST['blocked_days'] ?? ''),
     ]);
     flash('success', 'Horários e configurações salvos. Os agendamentos dos clientes já usam esses horários.');
     redirect(url('dono/configuracoes.php'));
@@ -109,17 +112,14 @@ admin_layout_start('Configurações', 'dono', 'config');
           <?php endif; ?>
         </div>
         <div>
-          <label class="form-label">Localização / Google Maps (link)</label>
-          <input name="maps_url" class="form-control" placeholder="https://maps.google.com/?q=..." value="<?= e($shop['maps_url'] ?? '') ?>">
-          <?php
-            $mapsPreview = normalize_external_url((string)($shop['maps_url'] ?? ''));
-          ?>
-          <?php if ($mapsPreview !== ''): ?>
-            <div class="form-text">
-              Link que abre no app:
-              <a href="<?= e($mapsPreview) ?>" target="_blank" rel="noopener noreferrer"><?= e($mapsPreview) ?></a>
-            </div>
-          <?php endif; ?>
+          <label class="form-label">Link do Google Maps (Localização)</label>
+          <input name="maps_url" class="form-control" placeholder="https://maps.app.goo.gl/..." value="<?= e($shop['maps_url'] ?? '') ?>">
+          <div class="form-text">Usado para o botão de "Como chegar" no app.</div>
+        </div>
+        <div>
+          <label class="form-label">Link do Google Meu Negócio (Avaliações)</label>
+          <input name="google_my_business_url" class="form-control" placeholder="https://g.page/r/..." value="<?= e($shop['google_my_business_url'] ?? '') ?>">
+          <div class="form-text">Se preenchido, clientes que derem 5 estrelas serão redirecionados para avaliar publicamente.</div>
         </div>
         <p class="small text-secondary mb-0">Esses links aparecem como ícones no topo do app do cliente.</p>
 
@@ -163,6 +163,16 @@ admin_layout_start('Configurações', 'dono', 'config');
         </div>
 
         <hr class="border-secondary opacity-25">
+        <h2 class="h6 mb-0">Dias bloqueados (Feriados / Folgas)</h2>
+        <p class="small text-secondary mb-0">Adicione datas em que a barbearia estará fechada.</p>
+        <div class="d-flex gap-2 mt-2">
+            <input type="text" id="blocked-date-input" class="form-control" placeholder="DD/MM/AAAA">
+            <button type="button" class="btn btn-outline-secondary" id="add-blocked-date">Adicionar</button>
+        </div>
+        <ul id="blocked-dates-list" class="list-group mt-2"></ul>
+        <input type="hidden" name="blocked_days" id="blocked-days-hidden" value="<?= e($shop['blocked_days'] ?? '') ?>">
+
+        <hr class="border-secondary opacity-25">
         <h2 class="h6 mb-0">Mercado Pago · cobrança real</h2>
         <p class="small text-secondary mb-0">Cartões tokenizados e cobrança de planos no app do cliente. Chaves em <a href="https://www.mercadopago.com.br/developers/panel/app" target="_blank" rel="noopener">developers.mercadopago.com</a>.</p>
         <div>
@@ -175,22 +185,58 @@ admin_layout_start('Configurações', 'dono', 'config');
         </div>
 
         <hr class="border-secondary opacity-25">
-        <h2 class="h6 mb-0">WhatsApp (Meta Cloud API)</h2>
-        <p class="small text-secondary mb-0">Necessário para o botão Disparar em Marketing. Crie templates aprovados no Business Manager. Também pode usar variáveis no arquivo <code>.env</code>.</p>
+        <h2 class="h6 mb-0">WhatsApp (Evolution API)</h2>
+        <p class="small text-secondary mb-0">Conecta o WhatsApp real da barbearia (escaneando um QR Code) pra disparar mensagens em Marketing — texto livre, sem precisar de template aprovado pela Meta.</p>
         <div>
-          <label class="form-label">Phone Number ID</label>
-          <input name="wa_phone_number_id" class="form-control" autocomplete="off" value="<?= e($shop['wa_phone_number_id'] ?? '') ?>" placeholder="Ex: 123456789012345">
+          <label class="form-label">URL da Evolution API</label>
+          <input name="evo_api_url" class="form-control" autocomplete="off" value="<?= e($shop['evo_api_url'] ?? '') ?>" placeholder="https://sua-evolution.exemplo.com">
         </div>
         <div>
-          <label class="form-label">Access Token</label>
-          <input name="wa_access_token" class="form-control" autocomplete="off" value="<?= e($shop['wa_access_token'] ?? '') ?>" placeholder="EAAB...">
+          <label class="form-label">API Key (global)</label>
+          <input name="evo_api_key" class="form-control" autocomplete="off" value="<?= e($shop['evo_api_key'] ?? '') ?>" placeholder="Chave da sua Evolution API">
         </div>
-        <p class="small <?= wa_configured() ? 'text-success' : 'text-secondary' ?> mb-0">
-          Status: <?= wa_configured() ? 'Configurado — disparos ativos' : 'Não configurado — Disparar não envia ainda' ?>
+        <div>
+          <label class="form-label">Nome da instância</label>
+          <input name="evo_instance" class="form-control" autocomplete="off" value="<?= e($shop['evo_instance'] ?? '') ?>" placeholder="<?= e(function_exists('evo_default_instance') ? evo_default_instance() : 'loja-' . shop_slug()) ?>">
+          <div class="form-text">Deixe em branco para usar o padrão acima — só mude se já tiver uma instância criada com outro nome.</div>
+        </div>
+        <p class="small <?= evo_configured() ? 'text-success' : 'text-secondary' ?> mb-0">
+          Status: <?= evo_configured() ? 'Credenciais salvas' : 'Preencha URL e API Key para liberar o Disparar em Marketing' ?>
         </p>
 
         <button class="btn btn-accent" type="submit">Salvar tudo</button>
       </form>
+
+      <?php if (evo_configured()): ?>
+      <div class="mt-3 pt-3 border-top border-secondary border-opacity-25">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <strong>Número conectado</strong>
+            <div class="small text-secondary">Status: <span id="evoStatusLabel">verificando…</span></div>
+          </div>
+          <button type="button" class="btn btn-sm btn-accent" id="evoConnectBtn">Conectar / Ver QR Code</button>
+        </div>
+        <div id="evoQrBox" class="d-none text-center mt-3">
+          <img id="evoQrImg" src="" alt="QR Code WhatsApp" style="width:220px;height:220px;background:#fff;border-radius:8px;padding:8px">
+          <p class="small text-secondary mt-2 mb-0">Abra o WhatsApp da barbearia → Aparelhos conectados → Conectar um aparelho, e escaneie.</p>
+        </div>
+      </div>
+
+      <div class="mt-3 pt-3 border-top border-secondary border-opacity-25">
+        <strong>Lembrete automático (1 dia antes)</strong>
+        <p class="small text-secondary mb-2">Manda WhatsApp sozinho pros clientes com horário confirmado pra amanhã. Precisa rodar 1x por dia — configure na sua hospedagem:</p>
+        <ul class="small text-secondary">
+          <li>VPS com cron real: <code>php <?= e(__DIR__) ?>/../scripts/lembretes.php</code></li>
+          <li>Hospedagem compartilhada (cron por URL, ex.: cPanel):
+            <div class="input-group mt-1">
+              <input type="text" class="form-control form-control-sm" readonly value="<?= e(absolute_url(base_path() . '/scripts/lembretes.php') . '?token=' . urlencode(cron_secret())) ?>">
+            </div>
+          </li>
+        </ul>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="evoTestReminders">Enviar lembretes de amanhã agora (teste)</button>
+        <span id="evoTestRemindersResult" class="small text-secondary ms-2"></span>
+      </div>
+      <?php endif; ?>
     </div>
   </div>
 
@@ -203,6 +249,11 @@ admin_layout_start('Configurações', 'dono', 'config');
         <li>Intervalo: <strong><?= (int)($shop['slot_minutes'] ?? 60) ?> min</strong></li>
         <li>Almoço: <?= !empty($shop['lunch_enabled']) ? '<strong>' . e(normalize_time($shop['lunch_start'] ?? '12:00')) . ' – ' . e(normalize_time($shop['lunch_end'] ?? '13:00')) . '</strong>' : 'desativado' ?></li>
       </ul>
+    </div>
+    <div class="card-soft p-3 mb-3">
+      <h2 class="h6">Backup dos dados</h2>
+      <p class="small text-secondary">Baixa um arquivo JSON com clientes, agendamentos, serviços, estoque e caixa — guarde de vez em quando.</p>
+      <a class="btn btn-outline-secondary w-100" href="<?= e(url('dono/backup.php')) ?>">⬇ Baixar backup agora</a>
     </div>
     <div class="card-soft p-3">
       <h2 class="h6">Horários ainda disponíveis hoje</h2>
@@ -239,6 +290,134 @@ admin_layout_start('Configurações', 'dono', 'config');
       setTimeout(() => { btn.textContent = 'Copiar'; }, 1600);
     }
   });
+
+  const hiddenInput = document.getElementById('blocked-days-hidden');
+  const dateInput = document.getElementById('blocked-date-input');
+  const addBtn = document.getElementById('add-blocked-date');
+  const list = document.getElementById('blocked-dates-list');
+
+  if (hiddenInput) {
+    let dates = hiddenInput.value ? hiddenInput.value.split(',') : [];
+
+    function renderDates() {
+        list.innerHTML = '';
+        hiddenInput.value = dates.join(',');
+        dates.forEach((d, i) => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center py-1';
+            const parts = d.split('-');
+            const displayDate = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d;
+            li.innerHTML = `<span>${displayDate}</span><button type="button" class="btn btn-sm btn-outline-danger px-2 py-0 border-0" data-idx="${i}">&times;</button>`;
+            list.appendChild(li);
+        });
+    }
+
+    list.addEventListener('click', e => {
+        if (e.target.tagName === 'BUTTON' && e.target.hasAttribute('data-idx')) {
+            dates.splice(e.target.dataset.idx, 1);
+            renderDates();
+        }
+    });
+
+    addBtn.addEventListener('click', () => {
+        const val = dateInput.value.trim();
+        const match = val.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (match) {
+            const ymd = `${match[3]}-${match[2]}-${match[1]}`;
+            if (!dates.includes(ymd)) {
+                dates.push(ymd);
+                dates.sort();
+                renderDates();
+            }
+            dateInput.value = '';
+        } else {
+            alert('Por favor, use o formato DD/MM/AAAA');
+        }
+    });
+
+    renderDates();
+  }
+
+  // WhatsApp Evolution API — conectar/QR/status
+  const evoBtn = document.getElementById('evoConnectBtn');
+  const evoLabel = document.getElementById('evoStatusLabel');
+  const evoBox = document.getElementById('evoQrBox');
+  const evoImg = document.getElementById('evoQrImg');
+  const evoUrl = <?= json_encode(url('api/whatsapp_evolution.php')) ?>;
+  let evoPoll = null;
+
+  function evoLabelText(state) {
+    return { open: 'Conectado ✅', connecting: 'Aguardando escanear o QR…', close: 'Desconectado', erro: 'Erro ao consultar', nao_configurado: 'Não configurado' }[state] || state;
+  }
+
+  async function evoFetchStatus() {
+    if (!evoLabel) return;
+    try {
+      const res = await fetch(evoUrl + '?action=status', { credentials: 'same-origin', cache: 'no-store' });
+      const data = await res.json();
+      const state = data.state || 'erro';
+      evoLabel.textContent = evoLabelText(state);
+      if (state === 'open' && evoPoll) {
+        clearInterval(evoPoll);
+        evoPoll = null;
+        if (evoBox) evoBox.classList.add('d-none');
+      }
+    } catch (e) {
+      evoLabel.textContent = 'Erro ao consultar';
+    }
+  }
+
+  if (evoBtn) {
+    evoBtn.addEventListener('click', async () => {
+      evoBtn.disabled = true;
+      evoBtn.textContent = 'Gerando QR Code…';
+      try {
+        const res = await fetch(evoUrl + '?action=connect', { credentials: 'same-origin', cache: 'no-store' });
+        const data = await res.json();
+        if (data.ok && data.qr && evoImg && evoBox) {
+          evoImg.src = data.qr;
+          evoBox.classList.remove('d-none');
+          if (!evoPoll) evoPoll = setInterval(evoFetchStatus, 4000);
+        } else if (data.ok && data.state === 'open') {
+          if (evoLabel) evoLabel.textContent = evoLabelText('open');
+        } else {
+          alert(data.error || 'Não deu pra gerar o QR Code agora. Confira a URL/API Key.');
+        }
+      } catch (e) {
+        alert('Falha ao falar com a Evolution API.');
+      }
+      evoBtn.disabled = false;
+      evoBtn.textContent = 'Conectar / Ver QR Code';
+    });
+  }
+
+  if (evoLabel) {
+    evoFetchStatus();
+    evoPoll = setInterval(evoFetchStatus, 6000);
+  }
+
+  const testBtn = document.getElementById('evoTestReminders');
+  const testResult = document.getElementById('evoTestRemindersResult');
+  if (testBtn) {
+    testBtn.addEventListener('click', async () => {
+      testBtn.disabled = true;
+      testResult.textContent = 'Enviando…';
+      try {
+        const res = await fetch(evoUrl + '?action=send_reminders_now', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'X-CSRF-Token': <?= json_encode(csrf_token()) ?> },
+        });
+        const data = await res.json();
+        testResult.textContent = data.ok
+          ? `Enviados: ${data.sent} · ignorados: ${data.skipped} · erros: ${data.errors}`
+          : (data.error || 'Falha ao enviar.');
+      } catch (e) {
+        testResult.textContent = 'Falha ao falar com o servidor.';
+      }
+      testBtn.disabled = false;
+    });
+  }
 })();
 </script>
 <?php admin_layout_end(); ?>

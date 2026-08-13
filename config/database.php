@@ -110,6 +110,9 @@ function ensure_extra_tables(): void
             'setup_completed' => 1,
             'wa_phone_number_id' => '',
             'wa_access_token' => '',
+            'evo_api_url' => '',
+            'evo_api_key' => '',
+            'evo_instance' => '',
             'loyalty_prata_min' => 100,
             'loyalty_ouro_min' => 200,
             'loyalty_points_per_real' => 1,
@@ -246,6 +249,9 @@ function seed_database(): void
         'mp_access_token' => '',
         'wa_phone_number_id' => '',
         'wa_access_token' => '',
+        'evo_api_url' => '',
+        'evo_api_key' => '',
+        'evo_instance' => '',
     ]]);
 
     $passDono = password_hash('dono123', PASSWORD_DEFAULT);
@@ -257,18 +263,18 @@ function seed_database(): void
     ]);
 
     $services = [
-        ['Corte', 'Degradê / americano / low fade / mid fade / moicano', 35, 30],
-        ['Corte Social', 'Corte social clássico', 30, 30],
-        ['Barba', 'Barba completa com navalha', 25, 25],
-        ['Sobrancelha na navalha', 'Design de sobrancelha', 5, 10],
-        ['Corte + Barba + Sobrancelha', 'Combo completo', 65, 70],
-        ['Hidratação simples', 'Hidratação capilar', 20, 20],
-        ['Limpeza de pele simples', 'Limpeza facial básica', 20, 25],
-        ['Pigmentação', 'Pigmentação capilar', 25, 30],
-        ['Relaxamento (Alisamento)', 'Alisamento masculino', 65, 90],
-        ['Luzes + corte e sobrancelha', 'Mechas com corte', 130, 100],
-        ['Pezinho / bigode / cavanhaque', 'Acabamento rápido', 10, 15],
-        ['Corte Kids', 'Corte infantil até 12 anos', 30, 25],
+        ['Corte', 'Degradê, americano, low fade, mid fade ou moicano', 35, 30],
+        ['Corte Social', 'Corte clássico na tesoura e máquina', 30, 30],
+        ['Barba', 'Toalha quente, navalha e finalizador', 25, 25],
+        ['Sobrancelha', 'Limpeza e alinhamento na navalha', 5, 10],
+        ['Combo Cabelo + Barba', 'Corte e barba alinhados (Desconto no combo)', 55, 60],
+        ['Hidratação', 'Hidratação rápida pra recuperar os fios', 20, 20],
+        ['Limpeza de Pele', 'Máscara preta removedora de cravos', 20, 25],
+        ['Pigmentação', 'Tinta no cabelo ou barba para aquele disfarce', 25, 30],
+        ['Luzes (Nevou)', 'Platinado de respeito + corte e sobrancelha', 130, 100],
+        ['Relaxamento', 'Redução de volume e alisamento', 65, 90],
+        ['Acabamento', 'Só o pezinho, bigode ou cavanhaque', 10, 15],
+        ['Corte Kids', 'Corte infantil (até 12 anos)', 30, 25],
     ];
 
     $svcRows = [];
@@ -697,6 +703,85 @@ function sync_shop_slug_from_name(): void
     $row['id'] = 1;
     store_write('settings', [$row]);
     settings(true);
+}
+
+/** Garante metas padrão (loja + barbeiros ativos) para o mês atual. */
+function ensure_default_goals(): array
+{
+    $month = date('Y-m');
+    $goals = array_values(array_filter(
+        store_read('goals'),
+        fn($g) => ($g['month'] ?? $month) === $month
+    ));
+    $changed = count($goals) !== count(store_read('goals'));
+
+    $hasLoja = false;
+    foreach ($goals as $g) {
+        if (($g['type'] ?? '') === 'loja' || empty($g['barber_id'])) {
+            $hasLoja = true;
+            break;
+        }
+    }
+    if (!$hasLoja) {
+        $goals[] = [
+            'id' => 0,
+            'barber_id' => null,
+            'month' => $month,
+            'target' => 30000,
+            'type' => 'loja',
+        ];
+        $changed = true;
+    }
+
+    foreach (active_barbers() as $b) {
+        $bid = (int)$b['id'];
+        $exists = false;
+        foreach ($goals as $g) {
+            if ((int)($g['barber_id'] ?? 0) === $bid) {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            $goals[] = [
+                'id' => 0,
+                'barber_id' => $bid,
+                'month' => $month,
+                'target' => 8000,
+                'type' => 'faturamento',
+            ];
+            $changed = true;
+        }
+    }
+
+    if ($changed || !$goals) {
+        $next = 1;
+        foreach ($goals as $i => $g) {
+            if ((int)($g['id'] ?? 0) < 1) {
+                $goals[$i]['id'] = $next;
+            } else {
+                $goals[$i]['id'] = (int)$g['id'];
+            }
+            $next = max($next, (int)$goals[$i]['id']) + 1;
+        }
+        // Normalize sequential ids if any collision
+        $used = [];
+        foreach ($goals as $i => $g) {
+            $id = (int)$g['id'];
+            if ($id < 1 || isset($used[$id])) {
+                while (isset($used[$next])) {
+                    $next++;
+                }
+                $id = $next;
+                $goals[$i]['id'] = $id;
+            }
+            $used[$id] = true;
+            $next = max($next, $id + 1);
+        }
+        store_write('goals', array_values($goals));
+    }
+
+    return store_read('goals');
 }
 
 function find_plan(int $id): ?array

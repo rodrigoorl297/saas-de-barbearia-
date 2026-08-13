@@ -1,10 +1,20 @@
 <?php
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/layout.php';
+require_once __DIR__ . '/../includes/whatsapp.php';
 
 $user = require_role(['dono']);
 $today = date('Y-m-d');
 $month = date('Y-m');
+
+$checklist = [
+    ['done' => (bool)active_services(), 'label' => 'Cadastrar ao menos 1 serviço', 'url' => url('dono/servicos.php')],
+    ['done' => (bool)active_barbers(), 'label' => 'Cadastrar ao menos 1 barbeiro', 'url' => url('dono/barbeiros.php')],
+    ['done' => evo_configured(), 'label' => 'Conectar o WhatsApp da barbearia', 'url' => url('dono/configuracoes.php')],
+    ['done' => trim((string)(settings()['logo_url'] ?? '')) !== '', 'label' => 'Colocar a logo no app do cliente', 'url' => url('dono/configuracoes.php')],
+];
+$checklistDone = count(array_filter($checklist, fn($c) => $c['done']));
+$checklistTotal = count($checklist);
 
 $all = appointments_enriched();
 $hoje = array_filter($all, fn($a) => $a['date'] === $today && $a['status'] !== 'cancelado');
@@ -33,6 +43,24 @@ $lowStock = count(array_filter(store_read('stock'), fn($i) => (int)$i['qty'] <= 
 
 admin_layout_start('Dashboard', 'dono', 'dashboard');
 ?>
+
+<?php if ($checklistDone < $checklistTotal): ?>
+<div class="card-soft premium-panel p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2 class="h6 mb-0 fw-bold">Primeiros passos (<?= $checklistDone ?>/<?= $checklistTotal ?>)</h2>
+  </div>
+  <div class="row g-2">
+    <?php foreach ($checklist as $c): ?>
+      <div class="col-md-6">
+        <a href="<?= e($c['url']) ?>" class="d-flex align-items-center gap-2 text-decoration-none p-2 rounded <?= $c['done'] ? 'text-secondary' : '' ?>" style="<?= $c['done'] ? '' : 'background:rgba(201,162,39,.08)' ?>">
+          <span class="checklist-mark <?= $c['done'] ? 'is-done' : '' ?>"><?= $c['done'] ? icon_svg('check', 13) : '' ?></span>
+          <span style="<?= $c['done'] ? 'text-decoration:line-through' : 'color:#0f172a;font-weight:600' ?>"><?= e($c['label']) ?></span>
+        </a>
+      </div>
+    <?php endforeach; ?>
+  </div>
+</div>
+<?php endif; ?>
 
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">

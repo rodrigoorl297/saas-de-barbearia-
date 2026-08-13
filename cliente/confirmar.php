@@ -13,6 +13,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['date'], $_POST['time'
     if (!empty($_POST['barber_id'])) {
         $_SESSION['booking']['barber_id'] = (int) $_POST['barber_id'];
     }
+    
+    // Trava de segurança: apenas até domingo da semana atual
+    $hojeW = (int)date('w');
+    $diasAteDomingo = $hojeW === 0 ? 0 : 7 - $hojeW;
+    $ultimoDiaSemana = date('Y-m-d', strtotime("+$diasAteDomingo days"));
+    
+    if ($_SESSION['booking']['date'] > $ultimoDiaSemana) {
+        unset($_SESSION['booking']['date']);
+        flash('danger', 'A data selecionada não é permitida.');
+        redirect(url('cliente/profissional.php'));
+    }
+    
     $booking = $_SESSION['booking'];
 }
 
@@ -76,6 +88,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm'])) {
                 ]);
                 $clientId = (int)$client['id'];
             }
+        }
+    }
+
+    if ($error === null && !empty($clientId)) {
+        if (client_already_booked_on_date((int)$clientId, (string)$booking['date'], (string)$phone)) {
+            $error = 'Você já tem agendamento neste dia. Só é permitido um horário por dia.';
         }
     }
 

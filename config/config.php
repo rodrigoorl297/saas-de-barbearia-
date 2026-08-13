@@ -33,6 +33,7 @@ require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/upload.php';
 require_once __DIR__ . '/../includes/mercadopago.php';
+require_once __DIR__ . '/../includes/email.php';
 
 // Instala o banco automaticamente na primeira visita
 ensure_database();

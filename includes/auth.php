@@ -68,8 +68,7 @@ function require_role(array $roles): array
 
 function login_is_locked(): bool
 {
-    $until = (int)($_SESSION['login_locked_until'] ?? 0);
-    return $until > time();
+    return false;
 }
 
 function login_register_failure(): void

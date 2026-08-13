@@ -3,7 +3,10 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/layout.php';
 
 $user = require_role(['dono']);
-$date = $_POST['date'] ?? ($_GET['date'] ?? date('Y-m-d'));
+$date = (string)($_POST['date'] ?? ($_GET['date'] ?? date('Y-m-d')));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+    $date = date('Y-m-d');
+}
 $view = ($_POST['view'] ?? ($_GET['view'] ?? 'agenda')) === 'historico' ? 'historico' : 'agenda';
 $servicesCatalog = active_services();
 $agendaUrl = static function (string $d, string $v = 'agenda') {
@@ -13,7 +16,56 @@ $agendaUrl = static function (string $d, string $v = 'agenda') {
 // ── POST ─────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'status';
+
+    if ($action === 'remove_waitlist') {
+        $wid = (string)($_POST['waitlist_id'] ?? '');
+        $waitlistFull = store_read('waitlist') ?: [];
+        $newWl = array_filter($waitlistFull, fn($w) => $w['id'] !== $wid);
+        store_write('waitlist', array_values($newWl));
+        flash('success', 'Cliente removido da fila de espera.');
+        redirect($agendaUrl($date, $view));
+    }
+
     $id     = (int)($_POST['id'] ?? 0);
+
+    // Cliente que chegou na hora (walk-in): entra confirmado, sem horário fixo da grade,
+    // e a agenda já abre o modal de finalizar pra marcar os serviços e faturar.
+    if ($action === 'walkin') {
+        $today = date('Y-m-d');
+        $name  = trim((string)($_POST['client_name'] ?? ''));
+        $phone = preg_replace('/\D+/', '', (string)($_POST['client_phone'] ?? ''));
+        $barberId = (int)($_POST['barber_id'] ?? 0);
+        $time = normalize_time($_POST['time'] ?? '', date('H:i'));
+
+        $barber = find_user_by_id($barberId);
+        if ($name === '' || strlen($phone) < 10) {
+            flash('danger', 'Nome e telefone (com DDD) são obrigatórios.');
+            redirect($agendaUrl($today, 'agenda'));
+        }
+        if (!$barber || ($barber['role'] ?? '') !== 'barbeiro' || empty($barber['active'])) {
+            flash('danger', 'Selecione um barbeiro válido.');
+            redirect($agendaUrl($today, 'agenda'));
+        }
+
+        $client = upsert_client(['name' => $name, 'phone' => $phone]);
+        $new = save_appointment([
+            'client_id'    => (int)$client['id'],
+            'client_name'  => $client['name'],
+            'client_phone' => $client['phone'],
+            'barber_id'    => $barberId,
+            'service_id'   => null,
+            'service_ids'  => [],
+            'date'         => $today,
+            'time'         => $time,
+            'status'       => 'confirmado',
+            'notes'        => 'Atendimento na hora',
+            'price'        => 0,
+            'products'     => [],
+        ]);
+
+        flash('success', 'Cliente adicionado às ' . $time . '. Agora marque os serviços e finalize.');
+        redirect($agendaUrl($today, 'agenda') . '&open=' . (int)$new['id']);
+    }
 
     $all = store_read('appointments');
     foreach ($all as &$a) {
@@ -72,11 +124,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ── dados ────────────────────────────────────────────────────────
+$openId = (int)($_GET['open'] ?? 0);
 $barbers = active_barbers();
-$rows    = appointments_enriched(fn($a) => $a['date'] === $date);
+$apptDate = static fn($a): string => substr((string)($a['date'] ?? ''), 0, 10);
+$rows    = appointments_enriched(fn($a) => $apptDate($a) === $date);
 $activeRows = array_values(array_filter($rows, fn($a) => !in_array($a['status'] ?? '', ['concluido', 'cancelado', 'faltou'], true)));
 $historyRows = array_values(array_filter($rows, fn($a) => in_array($a['status'] ?? '', ['concluido', 'cancelado', 'faltou'], true)));
 usort($historyRows, fn($a, $b) => strcmp($b['time'], $a['time']));
+
+$waitlistFull = store_read('waitlist') ?: [];
+$waitlistToday = array_values(array_filter($waitlistFull, fn($w) => $w['date'] === $date));
+
+// Dias próximos com horário (quando o dia atual está vazio)
+$nearbyDays = [];
+if (!$rows) {
+    $counts = [];
+    foreach (appointments_enriched() as $a) {
+        $d = $apptDate($a);
+        if ($d === '' || in_array($a['status'] ?? '', ['cancelado'], true)) {
+            continue;
+        }
+        $counts[$d] = ($counts[$d] ?? 0) + 1;
+    }
+    ksort($counts);
+    foreach ($counts as $d => $n) {
+        if ($d >= $date) {
+            $nearbyDays[] = ['date' => $d, 'count' => $n];
+            if (count($nearbyDays) >= 3) {
+                break;
+            }
+        }
+    }
+}
 
 $byBarber = [];
 foreach ($barbers as $b) {
@@ -132,6 +211,11 @@ admin_layout_start('Agenda', 'dono', 'agenda');
       <?php if ($concluidos > 0): ?><span class="agenda-view-count"><?= $concluidos ?></span><?php endif; ?>
     </a>
   </div>
+  <?php if ($barbers): ?>
+    <button type="button" class="btn btn-accent agenda-walkin-btn" data-bs-toggle="modal" data-bs-target="#walkinModal">
+      ⚡ Cliente na hora
+    </button>
+  <?php endif; ?>
   <div class="agenda-stats">
     <div class="agenda-stat">
       <span class="agenda-stat-val"><?= $pendentes ?></span>
@@ -150,6 +234,23 @@ admin_layout_start('Agenda', 'dono', 'agenda');
 
 <?php if ($view === 'agenda'): ?>
 <p class="small text-secondary mb-3 px-1">Ao finalizar, o atendimento sai da agenda e vai para o <strong>Histórico</strong>. Use <strong>+ Serviços</strong> para incluir o que o cliente pediu na hora.</p>
+
+<?php if ($waitlistToday): ?>
+  <div class="alert alert-warning py-2 px-3 mb-3 d-flex justify-content-between align-items-center">
+    <span>Há <?= count($waitlistToday) ?> cliente(s) na fila de espera para hoje.</span>
+    <button type="button" class="btn btn-sm btn-dark" data-bs-toggle="modal" data-bs-target="#waitlistModal">Ver Fila</button>
+  </div>
+<?php endif; ?>
+
+<?php if (!$rows && $nearbyDays): ?>
+  <div class="alert alert-info py-2 px-3 mb-3">
+    Nenhum agendamento em <strong><?= e(date('d/m/Y', strtotime($date))) ?></strong>.
+    <?php foreach ($nearbyDays as $i => $nd): ?>
+      <?= $i > 0 ? ' · ' : '' ?>
+      <a href="<?= e($agendaUrl($nd['date'], 'agenda')) ?>"><strong><?= e(date('d/m/Y', strtotime($nd['date']))) ?></strong> (<?= (int)$nd['count'] ?>)</a>
+    <?php endforeach; ?>
+  </div>
+<?php endif; ?>
 
 <div class="agenda-board">
   <?php foreach ($byBarber as $col): ?>
@@ -314,6 +415,56 @@ admin_layout_start('Agenda', 'dono', 'agenda');
 </div>
 <?php endif; ?>
 
+<div class="modal fade" id="walkinModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content stock-modal">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title">Cliente na hora</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-secondary mb-3">Cliente chegou sem hora marcada? Cadastre aqui e finalize com os serviços na sequência.</p>
+        <form method="post" class="vstack gap-3" id="walkinForm">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="walkin">
+          <div>
+            <label class="form-label">Nome do cliente</label>
+            <input type="text" name="client_name" class="form-control" required autofocus>
+          </div>
+          <div>
+            <label class="form-label">Telefone (com DDD)</label>
+            <input type="tel" name="client_phone" class="form-control" placeholder="(11) 91234-5678" required>
+          </div>
+          <div>
+            <label class="form-label">Barbeiro</label>
+            <select name="barber_id" class="form-select" required>
+              <option value="">Selecione…</option>
+              <?php foreach ($barbers as $bx): ?>
+                <option value="<?= (int)$bx['id'] ?>"><?= e($bx['name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div>
+            <label class="form-label d-flex justify-content-between align-items-center">
+              <span>Horário</span>
+              <span class="small text-secondary">Agora: <strong id="walkinClock">--:--</strong></span>
+            </label>
+            <div class="d-flex gap-2">
+              <input type="time" name="time" id="walkinTime" class="form-control" required>
+              <button type="button" class="btn btn-ghost" id="walkinUseNow">Usar agora</button>
+            </div>
+            <div class="form-text">Preenche com o horário atual, mas você pode trocar pra qualquer hora — não precisa bater com a grade de horários.</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 justify-content-end">
+            <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
+            <button class="btn btn-accent" type="submit">Adicionar e escolher serviços</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="finalizeModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content stock-modal">
@@ -358,6 +509,49 @@ admin_layout_start('Agenda', 'dono', 'agenda');
   </div>
 </div>
 
+<div class="modal fade" id="waitlistModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content stock-modal">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title">Fila de Espera (<?= e(date('d/m/Y', strtotime($date))) ?>)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body">
+        <?php if (!$waitlistToday): ?>
+          <p>Ninguém na fila para hoje.</p>
+        <?php else: ?>
+          <div class="vstack gap-3">
+            <?php foreach ($waitlistToday as $wl): 
+               $wlBarber = find_user_by_id((int)$wl['barber_id']);
+            ?>
+              <div class="d-flex justify-content-between align-items-center p-2 border rounded">
+                <div>
+                  <strong><?= e($wl['client_name']) ?></strong>
+                  <div class="small text-secondary">
+                    <?= e($wl['client_phone']) ?> <br>
+                    Barbeiro: <?= e($wlBarber ? $wlBarber['name'] : 'Qualquer') ?>
+                  </div>
+                </div>
+                <div class="d-flex gap-2">
+                  <?php if ($wl['client_phone']): ?>
+                    <a href="https://wa.me/55<?= preg_replace('/\D+/', '', $wl['client_phone']) ?>" target="_blank" class="btn btn-sm btn-success d-flex align-items-center">WhatsApp</a>
+                  <?php endif; ?>
+                  <form method="post" class="m-0">
+                    <input type="hidden" name="action" value="remove_waitlist">
+                    <input type="hidden" name="waitlist_id" value="<?= e($wl['id']) ?>">
+                    <input type="hidden" name="date" value="<?= e($date) ?>">
+                    <button type="submit" class="btn btn-sm btn-outline-danger h-100" title="Remover da fila">&times;</button>
+                  </form>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 function agendaOnStatus(sel) {
   if (sel.value === 'concluido') {
@@ -380,7 +574,36 @@ function updateFinalizeTotal() {
   if (out) out.textContent = moneyBr(total);
 }
 
+function walkinNowHHMM() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  // Relógio do modal "Cliente na hora": mostra a hora atual ao vivo e
+  // preenche o campo de horário toda vez que o modal é aberto.
+  const walkinModal = document.getElementById('walkinModal');
+  const walkinClock = document.getElementById('walkinClock');
+  const walkinTime = document.getElementById('walkinTime');
+  const walkinUseNow = document.getElementById('walkinUseNow');
+  if (walkinModal && walkinClock) {
+    const tick = () => { walkinClock.textContent = walkinNowHHMM(); };
+    tick();
+    setInterval(tick, 1000);
+    walkinModal.addEventListener('show.bs.modal', () => {
+      if (walkinTime) walkinTime.value = walkinNowHHMM();
+    });
+  }
+  if (walkinUseNow && walkinTime) {
+    walkinUseNow.addEventListener('click', () => { walkinTime.value = walkinNowHHMM(); });
+  }
+
+  <?php if ($openId > 0): ?>
+  // Veio de "Cliente na hora": abre direto o finalizar pra marcar os serviços.
+  const openBtn = document.querySelector('.agenda-add-svc-btn[data-apt-id="<?= (int)$openId ?>"]');
+  if (openBtn) openBtn.click();
+  <?php endif; ?>
+
   const modal = document.getElementById('finalizeModal');
   if (!modal) return;
 

@@ -36,7 +36,6 @@ render_head('Entrar');
 ?>
 <div class="login-stage">
   <div class="login-stage-glow" aria-hidden="true"></div>
-  <div class="login-stage-grid" aria-hidden="true"></div>
 
   <div class="login-shell login-shell--form">
     <header class="login-hero login-hero--compact">

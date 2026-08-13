@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/layout.php';
 
 $user = require_role(['dono']);
 $month = date('Y-m');
+$goals = ensure_default_goals();
 $all = appointments_enriched(fn($a) => str_starts_with($a['date'], $month) && $a['status'] !== 'cancelado');
 
 $fatByBarber = [];
@@ -12,11 +13,11 @@ foreach ($all as $a) {
     $fatByBarber[$bid] = ($fatByBarber[$bid] ?? 0) + (float)$a['price'];
 }
 $lojaFat = array_sum($fatByBarber);
-$goals = store_read('goals');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int)($_POST['id'] ?? 0);
     $target = (float)($_POST['target'] ?? 0);
+    $goals = ensure_default_goals();
     foreach ($goals as $i => $g) {
         if ((int)$g['id'] === $id) {
             $goals[$i]['target'] = $target;
@@ -30,7 +31,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 admin_layout_start('Metas', 'dono', 'metas');
 ?>
+<div class="row g-3 mb-3">
+  <div class="col-12">
+    <p class="text-secondary mb-0">Acompanhe o faturamento do mês e ajuste as metas da loja e de cada barbeiro.</p>
+  </div>
+</div>
 <div class="row g-3">
+  <?php if (!$goals): ?>
+    <div class="col-12">
+      <div class="card-soft p-4 text-center text-secondary">Nenhuma meta ainda. Cadastre barbeiros para gerar metas individuais.</div>
+    </div>
+  <?php endif; ?>
   <?php foreach ($goals as $g):
       $isLoja = ($g['type'] ?? '') === 'loja' || empty($g['barber_id']);
       $nome = $isLoja ? 'Meta da loja' : (find_user_by_id((int)$g['barber_id'])['name'] ?? 'Barbeiro');
@@ -49,6 +60,7 @@ admin_layout_start('Metas', 'dono', 'metas');
         <div class="progress-bar" style="width:<?= number_format($pct, 1) ?>%;background:#c9a227"></div>
       </div>
       <form method="post" class="d-flex gap-2">
+        <?= csrf_field() ?>
         <input type="hidden" name="id" value="<?= (int)$g['id'] ?>">
         <input type="number" step="0.01" name="target" class="form-control form-control-sm" value="<?= e((string)$target) ?>">
         <button class="btn btn-sm btn-accent" type="submit">Salvar</button>

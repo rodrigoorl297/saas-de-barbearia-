@@ -63,11 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             store_write('campaigns', $rows);
             $count = send_whatsapp_campaign($camp);
             if (!wa_configured()) {
-                flash('warning', 'WhatsApp ainda não configurado. Em Configurações, informe Phone Number ID e Access Token da Meta.');
+                flash('warning', 'WhatsApp ainda não configurado. Em Configurações, informe a URL e a API Key da Evolution API e conecte o número.');
             } elseif ($count > 0) {
                 flash('success', "WhatsApp disparado! $count mensagens enviadas.");
             } else {
-                flash('warning', 'Nenhuma mensagem enviada. Confira templates aprovados e o público da campanha.');
+                flash('warning', 'Nenhuma mensagem enviada. Confira se o número está conectado (Configurações) e se há clientes no público da campanha.');
             }
         }
         redirect(url('dono/marketing.php'));
@@ -191,6 +191,12 @@ admin_layout_start('Marketing', 'dono', 'marketing');
       <button type="button" class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#campaignModal">+ Nova campanha</button>
     </div>
   </div>
+
+  <?php if (!wa_configured()): ?>
+    <div class="alert alert-warning py-2 px-3 mb-3">
+      WhatsApp ainda não conectado. Vá em <a href="<?= e(url('dono/configuracoes.php')) ?>"><strong>Configurações</strong></a>, informe a Evolution API e escaneie o QR Code pra liberar o Disparar.
+    </div>
+  <?php endif; ?>
 
   <div class="stock-kpis">
     <div class="stock-kpi">
@@ -391,8 +397,9 @@ admin_layout_start('Marketing', 'dono', 'marketing');
             </div>
           </div>
           <div>
-            <label class="form-label">Mensagem / template WhatsApp</label>
-            <textarea name="message" class="form-control" rows="5" required placeholder="Ex: Oi! Faz tempo que não te vemos. Agende com 10% OFF esta semana."><?= e($edit['message'] ?? '') ?></textarea>
+            <label class="form-label">Mensagem do WhatsApp</label>
+            <textarea name="message" class="form-control" rows="5" required placeholder="Ex: Oi {primeiro_nome}! Faz tempo que não te vemos. Agende com 10% OFF esta semana."><?= e($edit['message'] ?? '') ?></textarea>
+            <div class="form-text">Texto livre, enviado do jeito que está escrito. Use <code>{nome}</code> ou <code>{primeiro_nome}</code> pra personalizar por cliente.</div>
           </div>
           <div class="d-flex gap-2 justify-content-end">
             <?php if ($edit): ?>

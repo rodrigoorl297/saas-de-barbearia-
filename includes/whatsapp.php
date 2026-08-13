@@ -2,96 +2,134 @@
 declare(strict_types=1);
 
 /**
- * WhatsApp Cloud API (Meta).
- * Campanhas em massa exigem templates aprovados no Business Manager.
+ * Disparo de WhatsApp via Evolution API (Baileys).
+ * Cada barbearia conecta o próprio número escaneando um QR Code em
+ * Configurações — não precisa de aprovação de template (Meta Business),
+ * então o texto digitado na campanha é enviado literalmente.
  */
 
-function wa_settings(): array
+require_once __DIR__ . '/EvolutionClient.php';
+
+function evo_settings(): array
 {
     $s = settings();
     return [
-        'phone_number_id' => trim((string)($s['wa_phone_number_id'] ?? (defined('WA_PHONE_NUMBER_ID') ? WA_PHONE_NUMBER_ID : ''))),
-        'access_token' => trim((string)($s['wa_access_token'] ?? (defined('WA_ACCESS_TOKEN') ? WA_ACCESS_TOKEN : ''))),
+        'api_url'  => trim((string)($s['evo_api_url'] ?? '')),
+        'api_key'  => trim((string)($s['evo_api_key'] ?? '')),
+        'instance' => trim((string)($s['evo_instance'] ?? '')) ?: evo_default_instance(),
     ];
 }
 
-function wa_configured(): bool
+/** Nome de instância estável por barbearia (evita colisão entre lojas no mesmo servidor Evolution). */
+function evo_default_instance(): string
 {
-    $c = wa_settings();
-    return $c['phone_number_id'] !== '' && $c['access_token'] !== '';
+    return 'loja-' . shop_slug();
 }
 
+function evo_configured(): bool
+{
+    $c = evo_settings();
+    return $c['api_url'] !== '' && $c['api_key'] !== '';
+}
+
+function evo_client(): EvolutionClient
+{
+    $c = evo_settings();
+    return new EvolutionClient($c['api_url'], $c['api_key']);
+}
+
+/** Compat com o restante do painel (marketing.php chama wa_configured()/wa_settings()). */
+function wa_configured(): bool
+{
+    return evo_configured();
+}
+
+function wa_settings(): array
+{
+    return evo_settings();
+}
+
+/** Estado da conexão do WhatsApp da barbearia: open | connecting | close | erro. */
+function evo_connection_status(): string
+{
+    if (!evo_configured()) {
+        return 'nao_configurado';
+    }
+    try {
+        $c = evo_settings();
+        $resp = evo_client()->connectionState($c['instance']);
+        return EvolutionClient::parseConnectionState($resp);
+    } catch (Throwable $e) {
+        return 'erro';
+    }
+}
+
+/**
+ * Substitui variáveis simples na mensagem da campanha.
+ * Hoje suporta {nome} — dá pra crescer sem mexer em quem chama.
+ */
+function evo_personalize(string $message, array $client): string
+{
+    $nome = trim((string)($client['name'] ?? ''));
+    $primeiroNome = $nome !== '' ? explode(' ', $nome)[0] : 'cliente';
+    return strtr($message, [
+        '{nome}' => $nome !== '' ? $nome : 'cliente',
+        '{primeiro_nome}' => $primeiroNome,
+    ]);
+}
+
+/**
+ * Dispara a campanha para o público alvo. Retorna quantas mensagens saíram com sucesso.
+ * Loga cada envio (sucesso ou falha) em data/whatsapp_log.txt.
+ */
 function send_whatsapp_campaign(array $campaign): int
 {
-    if (!wa_configured()) {
+    if (!evo_configured()) {
+        return 0;
+    }
+    $message = trim((string)($campaign['message'] ?? ''));
+    if ($message === '') {
         return 0;
     }
 
     $type = $campaign['type'] ?? 'promocional';
-    $templateName = trim((string)($campaign['message'] ?? ''));
-    if ($templateName === '') {
-        return 0;
-    }
-    // Se a mensagem parece texto livre, usa como nome de template sanitizado
-    $templateName = strtolower(preg_replace('/[^a-z0-9_]+/i', '_', $templateName) ?: 'hello_world');
-    $templateName = trim($templateName, '_');
-
     $clients = get_target_clients_for_campaign($type);
     if (!$clients) {
         return 0;
     }
 
-    $cfg = wa_settings();
-    $url = 'https://graph.facebook.com/v19.0/' . rawurlencode($cfg['phone_number_id']) . '/messages';
-    $count = 0;
+    // Trava de segurança: disparo manual, um clique por vez — evita mandar milhares numa tacada
+    // só e o número da barbearia ser bloqueado pelo WhatsApp por comportamento de spam.
+    $clients = array_slice($clients, 0, 300);
+
+    // Com a pausa entre envios, uma lista grande passa fácil do limite padrão de execução do PHP.
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(0);
+    }
+
+    $cfg = evo_settings();
+    $client = evo_client();
     $logFile = __DIR__ . '/../data/whatsapp_log.txt';
-    $timestamp = date('Y-m-d H:i:s');
+    $count = 0;
 
     foreach ($clients as $c) {
         $phone = preg_replace('/\D+/', '', (string)($c['phone'] ?? '')) ?: '';
+        $timestamp = date('Y-m-d H:i:s');
         if ($phone === '') {
             continue;
         }
-        if (!str_starts_with($phone, '55')) {
-            $phone = '55' . $phone;
-        }
 
-        $payload = [
-            'messaging_product' => 'whatsapp',
-            'to' => $phone,
-            'type' => 'template',
-            'template' => [
-                'name' => $templateName,
-                'language' => ['code' => 'pt_BR'],
-            ],
-        ];
-
-        $ok = false;
-        if (function_exists('curl_init')) {
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $cfg['access_token'],
-                    'Content-Type: application/json',
-                ],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 20,
-            ]);
-            $response = curl_exec($ch);
-            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            $ok = $code >= 200 && $code < 300;
-            $logMsg = "[$timestamp] HTTP $code | Tipo: $type | Cliente: {$c['name']} | Telefone: $phone | Template: $templateName | Resp: " . substr((string)$response, 0, 300) . "\n";
-        } else {
-            $logMsg = "[$timestamp] ERRO | curl indisponível | Cliente: {$c['name']} | Telefone: $phone\n";
-        }
-
-        file_put_contents($logFile, $logMsg, FILE_APPEND);
-        if ($ok) {
+        $text = evo_personalize($message, $c);
+        try {
+            $client->sendText($cfg['instance'], $phone, $text);
             $count++;
+            file_put_contents($logFile, "[$timestamp] OK | Cliente: {$c['name']} | Telefone: $phone\n", FILE_APPEND);
+        } catch (Throwable $e) {
+            file_put_contents($logFile, "[$timestamp] ERRO | Cliente: {$c['name']} | Telefone: $phone | " . $e->getMessage() . "\n", FILE_APPEND);
         }
+
+        // Pequena pausa entre envios — comportamento mais humano, reduz risco de bloqueio.
+        usleep(450000);
     }
 
     return $count;
@@ -136,4 +174,63 @@ function get_target_clients_for_campaign(string $type): array
     }
 
     return [];
+}
+
+/**
+ * Lembrete automático dos agendamentos de amanhã — pra chamar via cron/scripts/lembretes.php.
+ * Marca reminder_sent_at pra nunca lembrar o mesmo atendimento duas vezes.
+ */
+function send_appointment_reminders(): array
+{
+    $result = ['sent' => 0, 'skipped' => 0, 'errors' => 0];
+    if (!evo_configured()) {
+        return $result;
+    }
+
+    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+    $targets = appointments_enriched(function ($a) use ($tomorrow) {
+        return ($a['date'] ?? '') === $tomorrow
+            && in_array($a['status'] ?? '', ['agendado', 'confirmado'], true)
+            && empty($a['reminder_sent_at']);
+    });
+    if (!$targets) {
+        return $result;
+    }
+
+    $cfg = evo_settings();
+    $client = evo_client();
+    $shopName = shop_brand_name();
+    $logFile = __DIR__ . '/../data/whatsapp_log.txt';
+
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(0);
+    }
+
+    foreach ($targets as $a) {
+        $phone = preg_replace('/\D+/', '', (string)($a['client_phone'] ?? '')) ?: '';
+        $timestamp = date('Y-m-d H:i:s');
+        if ($phone === '') {
+            $result['skipped']++;
+            continue;
+        }
+
+        $hora = substr((string)($a['time'] ?? ''), 0, 5);
+        $text = "Oi {$a['client_name']}! Passando pra lembrar do seu horário amanhã às {$hora} na {$shopName}"
+            . (!empty($a['service_name']) ? " ({$a['service_name']})" : '')
+            . ". Até lá! ✂️";
+
+        try {
+            $client->sendText($cfg['instance'], $phone, $text);
+            save_appointment(['id' => (int)$a['id'], 'reminder_sent_at' => date('c')]);
+            $result['sent']++;
+            file_put_contents($logFile, "[$timestamp] LEMBRETE OK | Cliente: {$a['client_name']} | Telefone: $phone\n", FILE_APPEND);
+        } catch (Throwable $e) {
+            $result['errors']++;
+            file_put_contents($logFile, "[$timestamp] LEMBRETE ERRO | Cliente: {$a['client_name']} | Telefone: $phone | " . $e->getMessage() . "\n", FILE_APPEND);
+        }
+
+        usleep(450000);
+    }
+
+    return $result;
 }

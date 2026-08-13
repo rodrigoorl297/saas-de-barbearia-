@@ -25,34 +25,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $entries = store_read('cash_entries');
 usort($entries, fn($a, $b) => strcmp($b['created_at'] ?? '', $a['created_at'] ?? ''));
-$entradas = array_sum(array_map(fn($e) => $e['type'] === 'entrada' ? (float)$e['amount'] : 0, $entries));
-$saidas = array_sum(array_map(fn($e) => $e['type'] === 'saida' ? (float)$e['amount'] : 0, $entries));
-$saldo = $entradas - $saidas;
-$entries = array_slice($entries, 0, 40);
 
-admin_layout_start('Financeiro', 'dono', 'financeiro');
+$currentMonth = date('Y-m');
+$selectedMonth = preg_match('/^\d{4}-\d{2}$/', (string)($_GET['m'] ?? '')) ? (string)$_GET['m'] : $currentMonth;
+
+$filteredEntries = array_filter($entries, function($e) use ($selectedMonth) {
+    return str_starts_with($e['created_at'] ?? '', $selectedMonth);
+});
+
+$entradas = array_sum(array_map(fn($e) => $e['type'] === 'entrada' ? (float)$e['amount'] : 0, $filteredEntries));
+$saidas = array_sum(array_map(fn($e) => $e['type'] === 'saida' ? (float)$e['amount'] : 0, $filteredEntries));
+$saldo = $entradas - $saidas;
+$displayEntries = array_slice($filteredEntries, 0, 100);
+
+$monthsAvailable = [];
+foreach ($entries as $e) {
+    $m = substr($e['created_at'] ?? '', 0, 7);
+    if ($m) $monthsAvailable[$m] = true;
+}
+$monthsAvailable[$currentMonth] = true;
+$monthsAvailable = array_keys($monthsAvailable);
+rsort($monthsAvailable);
+
+admin_layout_start('Financeiro (DRE)', 'dono', 'financeiro');
 ?>
 <div class="stock-page">
-  <div class="stock-toolbar">
+  <div class="stock-toolbar d-flex flex-wrap gap-3 align-items-center justify-content-between">
     <div>
-      <h2 class="stock-heading">Financeiro</h2>
-      <p class="stock-sub">Entradas, saídas e saldo da barbearia.</p>
+      <h2 class="stock-heading">DRE Financeiro</h2>
+      <p class="stock-sub">Entradas, saídas e Lucro Líquido Real.</p>
     </div>
-    <button type="button" class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#cashModal">+ Novo lançamento</button>
+    <div class="d-flex gap-2 align-items-center">
+      <form method="get" class="d-flex m-0">
+        <select name="m" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width: 150px;">
+          <?php foreach ($monthsAvailable as $m): 
+            $mLabel = date('M Y', strtotime($m . '-01'));
+          ?>
+            <option value="<?= e($m) ?>" <?= $m === $selectedMonth ? 'selected' : '' ?>><?= e(ucfirst($mLabel)) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+      <button type="button" class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#cashModal">+ Novo lançamento</button>
+    </div>
   </div>
 
   <div class="stock-kpis">
     <div class="stock-kpi">
-      <span class="stock-kpi-label">Entradas</span>
+      <span class="stock-kpi-label">Receita Bruta</span>
       <strong class="stock-kpi-value" style="color:#16a34a"><?= e(money($entradas)) ?></strong>
     </div>
     <div class="stock-kpi">
-      <span class="stock-kpi-label">Saídas</span>
+      <span class="stock-kpi-label">Despesas</span>
       <strong class="stock-kpi-value" style="color:#dc2626"><?= e(money($saidas)) ?></strong>
     </div>
     <div class="stock-kpi">
-      <span class="stock-kpi-label">Saldo</span>
-      <strong class="stock-kpi-value"><?= e(money($saldo)) ?></strong>
+      <span class="stock-kpi-label">Lucro Líquido</span>
+      <strong class="stock-kpi-value" style="color:<?= $saldo >= 0 ? '#16a34a' : '#dc2626' ?>"><?= e(money($saldo)) ?></strong>
     </div>
   </div>
 
@@ -74,16 +102,23 @@ admin_layout_start('Financeiro', 'dono', 'financeiro');
           </tr>
         </thead>
         <tbody>
-        <?php foreach ($entries as $e): ?>
+        <?php foreach ($displayEntries as $e): ?>
           <tr>
             <td><?= e(date('d/m/Y H:i', strtotime($e['created_at']))) ?></td>
-            <td><?= $e['type'] === 'entrada' ? '<span class="badge text-bg-success">Entrada</span>' : '<span class="badge text-bg-danger">Saída</span>' ?></td>
+            <td>
+              <?php if ($e['type'] === 'entrada'): ?>
+                <span class="badge text-bg-success">Entrada</span>
+              <?php else: ?>
+                <span class="badge text-bg-danger">Saída</span>
+              <?php endif; ?>
+              <div class="small text-secondary mt-1"><?= e($e['category'] ?? 'geral') ?></div>
+            </td>
             <td><?= e($e['description']) ?></td>
             <td class="text-end fw-semibold"><?= e(money((float)$e['amount'])) ?></td>
           </tr>
         <?php endforeach; ?>
-        <?php if (!$entries): ?>
-          <tr><td colspan="4" class="text-secondary text-center py-4">Nenhum lançamento ainda.</td></tr>
+        <?php if (!$displayEntries): ?>
+          <tr><td colspan="4" class="text-secondary text-center py-4">Nenhum lançamento neste mês.</td></tr>
         <?php endif; ?>
         </tbody>
       </table>
@@ -102,18 +137,20 @@ admin_layout_start('Financeiro', 'dono', 'financeiro');
         <form method="post" class="vstack gap-3">
           <div>
             <label class="form-label">Tipo</label>
-            <select name="type" class="form-select">
-              <option value="entrada">Entrada</option>
-              <option value="saida">Saída</option>
+            <select name="type" class="form-select" id="cashType">
+              <option value="saida">Saída (Despesa)</option>
+              <option value="entrada">Entrada (Receita)</option>
             </select>
           </div>
           <div>
             <label class="form-label">Categoria</label>
-            <input name="category" class="form-control" value="geral">
+            <select name="category" class="form-select" id="cashCategory">
+              <!-- Populado via JS -->
+            </select>
           </div>
           <div>
             <label class="form-label">Descrição</label>
-            <input name="description" class="form-control" required>
+            <input name="description" class="form-control" placeholder="Ex: Conta de Luz" required>
           </div>
           <div>
             <label class="form-label">Valor</label>
@@ -128,4 +165,24 @@ admin_layout_start('Financeiro', 'dono', 'financeiro');
     </div>
   </div>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const typeSelect = document.getElementById('cashType');
+    const catSelect = document.getElementById('cashCategory');
+    
+    const categories = {
+        'saida': ['Aluguel', 'Água', 'Luz / Internet', 'Folha de Pagamento / Comissão', 'Reposição de Estoque', 'Marketing / Anúncios', 'Impostos', 'Outros'],
+        'entrada': ['Serviço', 'Produto / PDV', 'Investimento', 'Outros']
+    };
+    
+    function updateCats() {
+        const type = typeSelect.value;
+        const options = categories[type] || ['Geral'];
+        catSelect.innerHTML = options.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+    
+    typeSelect.addEventListener('change', updateCats);
+    updateCats();
+});
+</script>
 <?php admin_layout_end(); ?>

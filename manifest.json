@@ -1,0 +1,17 @@
+{
+  "name": "Barbearia App",
+  "short_name": "Barbearia",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0b0d12",
+  "theme_color": "#c9a227",
+  "description": "Aplicativo para agendamento na barbearia",
+  "icons": [
+    {
+      "src": "assets/img/logo-barba-flow.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

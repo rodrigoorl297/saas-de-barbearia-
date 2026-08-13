@@ -271,7 +271,16 @@ client_shell_start('agendamentos');
                 <span><span class="user-mini"><?= icon_svg('user', 14) ?></span> <?= e($a['barber_name']) ?></span>
                 <strong><?= e(money((float)$a['price'])) ?></strong>
               </div>
-              <a class="ver-mais-inline" href="#">Ver mais</a>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+                <a class="ver-mais-inline" href="#">Ver mais</a>
+                <?php if ($a['status'] === 'concluido' && empty($a['rating'])): ?>
+                  <a class="btn-sm" href="<?= e(url('cliente/avaliar.php?id=' . (int)$a['id'])) ?>" style="background: rgba(201,162,39,.1); color: #c9a227; padding: 4px 12px; border-radius: 12px; text-decoration: none; font-size: 0.8rem; font-weight: 600;">Avaliar</a>
+                <?php elseif (!empty($a['rating'])): ?>
+                  <span style="color: #c9a227; font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; gap: 2px;">
+                    <?= $a['rating'] ?> <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                  </span>
+                <?php endif; ?>
+              </div>
             </div>
           </div>
         <?php endforeach; ?>

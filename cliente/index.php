@@ -43,6 +43,10 @@ $logoUrl = shop_logo_path();
 
   <?php render_flash_client(); ?>
 
+  <?php if (!$services): ?>
+    <p class="historico-empty" style="text-align:center;padding:0 24px">Nenhum serviço disponível no momento. Fale com a barbearia.</p>
+  <?php endif; ?>
+
   <form id="form-servicos" action="<?= e(url('cliente/profissional.php')) ?>" method="post">
     <div class="card-servico-container">
       <?php foreach ($services as $i => $svc): ?>

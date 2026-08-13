@@ -30,7 +30,7 @@ try {
     $ags = (int)$pdo->query('SELECT COUNT(*) FROM agendamentos')->fetchColumn();
     echo '<h1>Banco pronto</h1>';
     echo '<ul>';
-    echo '<li>Banco: <strong>' . htmlspecialchars(env_str('DB_NAME')) . '</strong></li>';
+    echo '<li>Banco: <strong>' . htmlspecialchars(\App\DotEnv::getString('DB_NAME')) . '</strong></li>';
     echo '<li>Usuários: ' . $users . ' (visões: donos, barbeiros, clientes)</li>';
     echo '<li>Produtos: ' . $prods . '</li>';
     echo '<li>Agendamentos: ' . $ags . '</li>';

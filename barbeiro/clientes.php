@@ -17,7 +17,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $serviceId = (int)($_POST['service_id'] ?? 0);
         $date = trim($_POST['date'] ?? $today);
         $time = trim($_POST['time'] ?? '');
-        $wantBook = $id < 1 || !empty($_POST['also_book']);
+        $wantBook = !empty($_POST['also_book']);
+        $wantNow = !empty($_POST['cut_now']);
 
         if ($name === '' || strlen($phone) < 10) {
             flash('danger', 'Informe nome e telefone válidos (com DDD).');
@@ -26,6 +27,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($wantBook && ($serviceId < 1 || $time === '')) {
             flash('danger', 'Para agendar, escolha o serviço e o horário.');
+            redirect(url('barbeiro/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
+        }
+        
+        if ($wantNow && $serviceId < 1) {
+            flash('danger', 'Para registrar corte, escolha o serviço.');
             redirect(url('barbeiro/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
 
@@ -45,14 +51,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? 'Cliente atualizado.'
             : 'Cliente cadastrado. Senha inicial = telefone.';
 
-        if ($wantBook) {
-            $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
-            if (is_string($booked)) {
-                flash('warning', $msg . ' Agendamento não criado: ' . $booked);
-                redirect(url('barbeiro/clientes.php'));
-            }
+        if ($wantBook || $wantNow) {
             $svc = find_service($serviceId);
-            $msg .= ' Agendado: ' . ($svc['name'] ?? 'serviço') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '.';
+            
+            if ($wantNow) {
+                $nowTime = date('H:i');
+                $appointment = [
+                    'client_id' => (int)$client['id'],
+                    'client_name' => $client['name'],
+                    'client_phone' => $client['phone'],
+                    'barber_id' => $barberId,
+                    'service_id' => $serviceId,
+                    'date' => $today,
+                    'time' => $nowTime,
+                    'status' => 'concluido',
+                    'price' => (float)($svc['price'] ?? 0)
+                ];
+                save_appointment($appointment);
+                
+                $all = store_read('appointments');
+                $savedAppt = end($all);
+                
+                sync_appointment_cash($savedAppt, $user['id'] ?? 1);
+                sync_appointment_loyalty($savedAppt);
+                
+                $msg .= ' Corte registrado agora: ' . ($svc['name'] ?? '') . '.';
+            } else {
+                $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
+                if (is_string($booked)) {
+                    flash('warning', $msg . ' Agendamento não criado: ' . $booked);
+                    redirect(url('barbeiro/clientes.php'));
+                }
+                $msg .= ' Agendado: ' . ($svc['name'] ?? 'serviço') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '.';
+            }
         }
         flash('success', $msg);
     }
@@ -135,7 +166,7 @@ barber_shell_start('Clientes', 'clientes');
           <div class="bb-card-meta" style="margin-top:-6px">Última: <?= e(date('d/m/Y', strtotime((string)$c['last_visit']))) ?></div>
         <?php endif; ?>
         <div class="bb-actions">
-          <a class="bb-btn bb-btn--ghost" style="text-align:center;text-decoration:none;display:grid;place-items:center" href="<?= e(url('barbeiro/clientes.php?edit=' . (int)$c['id'])) ?>">Editar</a>
+          <a class="bb-btn bb-btn--ghost" style="text-align:center;text-decoration:none;display:grid;place-items:center" href="<?= e(url('barbeiro/clientes.php?edit=' . (int)$c['id'])) ?>">Ficha / Agendar</a>
         </div>
       </article>
     <?php endforeach; ?>
@@ -168,17 +199,22 @@ barber_shell_start('Clientes', 'clientes');
         <input type="date" name="birth_date" value="<?= e($edit['birth_date'] ?? '') ?>">
       </label>
 
-      <?php if ($edit): ?>
-        <label class="bb-check">
-          <input type="checkbox" name="also_book" value="1" id="alsoBook">
-          <span>Também agendar atendimento comigo</span>
-        </label>
-      <?php endif; ?>
+      <label class="bb-check mb-2" style="margin-bottom:8px">
+        <input type="radio" name="booking_type" value="book" id="alsoBook" class="action-radio">
+        <span>Agendar horário no futuro</span>
+      </label>
+      
+      <label class="bb-check mb-3" style="margin-bottom:16px;color:#4ade80">
+        <input type="radio" name="booking_type" value="now" id="cutNow" class="action-radio">
+        <span>Registrar corte de agora (Walk-in)</span>
+        <input type="hidden" name="also_book" id="alsoBookHidden" value="0">
+        <input type="hidden" name="cut_now" id="cutNowHidden" value="0">
+      </label>
 
-      <div id="bookFields" class="<?= $edit ? 'bb-book-hidden' : '' ?>">
+      <div id="bookFields" class="bb-book-hidden">
         <label>
           <span>Tipo de serviço</span>
-          <select name="service_id" id="bookService" <?= $edit ? '' : 'required' ?>>
+          <select name="service_id" id="bookService">
             <option value="">Selecione…</option>
             <?php foreach ($services as $s): ?>
               <option value="<?= (int)$s['id'] ?>" <?= $formService === (int)$s['id'] ? 'selected' : '' ?>>
@@ -193,17 +229,18 @@ barber_shell_start('Clientes', 'clientes');
         </label>
         <label>
           <span>Data</span>
-          <input type="date" name="date" id="bookDate" value="<?= e($formDate) ?>" <?= $edit ? '' : 'required' ?>>
+          <input type="date" name="date" id="bookDate" value="<?= e($formDate) ?>">
         </label>
         <label>
           <span>Horário</span>
-          <select name="time" id="bookTime" <?= $edit ? '' : 'required' ?>>
+          <select name="time" id="bookTime">
             <option value="">Selecione…</option>
             <?php foreach ($formSlots as $slot): ?>
               <option value="<?= e($slot) ?>"><?= e($slot) ?></option>
             <?php endforeach; ?>
           </select>
         </label>
+        <p class="bb-live-hint">Horários passados de hoje não aparecem. Troque a data se precisar.</p>
         <?php if (!$formSlots): ?>
           <p class="bb-live-hint" style="color:#fca5a5">Sem horários livres neste dia. Troque a data.</p>
         <?php endif; ?>
@@ -212,7 +249,7 @@ barber_shell_start('Clientes', 'clientes');
       <?php if (!$edit): ?>
         <p class="bb-live-hint">Senha inicial do app do cliente = telefone.</p>
       <?php endif; ?>
-      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit"><?= $edit ? 'Salvar' : 'Cadastrar e agendar' ?></button>
+      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit"><?= $edit ? 'Salvar' : 'Cadastrar cliente' ?></button>
       <?php if ($edit): ?>
         <a class="bb-btn bb-btn--ghost bb-btn--block" style="text-align:center;text-decoration:none" href="<?= e(url('barbeiro/clientes.php')) ?>">Cancelar</a>
       <?php endif; ?>
@@ -247,38 +284,79 @@ barber_shell_start('Clientes', 'clientes');
 document.addEventListener('DOMContentLoaded', () => {
   const sheet = document.getElementById('clientSheet');
   const also = document.getElementById('alsoBook');
+  const cutNow = document.getElementById('cutNow');
+  const alsoBookHidden = document.getElementById('alsoBookHidden');
+  const cutNowHidden = document.getElementById('cutNowHidden');
   const book = document.getElementById('bookFields');
   const svc = document.getElementById('bookService');
   const date = document.getElementById('bookDate');
   const time = document.getElementById('bookTime');
+  const slotsUrl = <?= json_encode(url('api/slots.php')) ?>;
+  const barberId = <?= (int)$barberId ?>;
 
   function toggleBook() {
     if (!book) return;
-    const on = !also || also.checked;
+    const isBook = !!(also && also.checked);
+    const isNow = !!(cutNow && cutNow.checked);
+    const on = isBook || isNow;
+    
+    if (alsoBookHidden) alsoBookHidden.value = isBook ? '1' : '0';
+    if (cutNowHidden) cutNowHidden.value = isNow ? '1' : '0';
+
     book.classList.toggle('bb-book-hidden', !on);
-    [svc, date, time].forEach((el) => {
+    
+    if (date && time) {
+        date.closest('label').style.display = isNow ? 'none' : 'block';
+        time.closest('label').style.display = isNow ? 'none' : 'block';
+    }
+    
+    if (svc) {
+        if (on) svc.setAttribute('required', 'required');
+        else svc.removeAttribute('required');
+    }
+    
+    [date, time].forEach((el) => {
       if (!el) return;
-      if (on) el.setAttribute('required', 'required');
+      if (isBook) el.setAttribute('required', 'required');
       else el.removeAttribute('required');
     });
+
+    if (isBook) loadSlots();
   }
-  if (also) also.addEventListener('change', toggleBook);
+
+  async function loadSlots() {
+    if (!time) return;
+    const d = date?.value || '';
+    const sid = svc?.value || '';
+    if (!d) {
+      time.innerHTML = '<option value=\"\">Selecione…</option>';
+      return;
+    }
+    time.innerHTML = '<option value=\"\">Carregando…</option>';
+    try {
+      const q = new URLSearchParams({ barber_id: String(barberId), date: d, service_id: sid });
+      const res = await fetch(slotsUrl + '?' + q.toString(), { credentials: 'same-origin', cache: 'no-store' });
+      const data = await res.json();
+      const slots = Array.isArray(data.slots) ? data.slots : [];
+      if (!slots.length) {
+        time.innerHTML = '<option value=\"\">Sem horários neste dia</option>';
+        return;
+      }
+      let html = '<option value=\"\">Selecione…</option>';
+      slots.forEach((s) => { html += '<option value=\"' + s + '\">' + s + '</option>'; });
+      time.innerHTML = html;
+    } catch (e) {
+      time.innerHTML = '<option value=\"\">Falha ao carregar</option>';
+    }
+  }
+
+  document.querySelectorAll('.action-radio').forEach(r => r.addEventListener('change', toggleBook));
+  [svc, date].forEach((el) => el && el.addEventListener('change', () => {
+      if (also && also.checked) loadSlots();
+  }));
   toggleBook();
 
-  function reloadSlots() {
-    const params = new URLSearchParams();
-    <?php if ($edit): ?>
-    params.set('edit', '<?= (int)$edit['id'] ?>');
-    <?php else: ?>
-    params.set('new', '1');
-    <?php endif; ?>
-    if (svc?.value) params.set('service_id', svc.value);
-    if (date?.value) params.set('date', date.value);
-    window.location.href = <?= json_encode(url('barbeiro/clientes.php')) ?> + '?' + params.toString();
-  }
-  [svc, date].forEach((el) => el && el.addEventListener('change', reloadSlots));
-
-  <?php if ($openSheet): ?>
+  <?php if ($edit || isset($_GET['new'])): ?>
   if (sheet && window.bootstrap) bootstrap.Offcanvas.getOrCreateInstance(sheet).show();
   <?php endif; ?>
 });

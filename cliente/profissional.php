@@ -2,13 +2,40 @@
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/layout.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['services'])) {
-    $ids = array_values(array_filter(array_map('intval', $_POST['services'] ?? [])));
-    if (!$ids) {
-        flash('warning', 'Selecione pelo menos um serviço.');
-        redirect(url('cliente/'));
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action']) && $_POST['action'] === 'join_waitlist') {
+        $user = current_user();
+        if (!$user) {
+            flash('warning', 'Você precisa estar logado para entrar na fila.');
+            redirect(url('login.php'));
+        }
+        $waitlist = store_read('waitlist') ?: [];
+        $bId = (int)($_POST['barber_id'] ?? 0);
+        $dt = $_POST['date'] ?? date('Y-m-d');
+        $waitlist[] = [
+            'id' => uniqid(),
+            'client_id' => $user['id'],
+            'client_name' => $user['name'],
+            'client_phone' => $user['phone'] ?? '',
+            'barber_id' => $bId,
+            'date' => $dt,
+            'created_at' => date('c')
+        ];
+        store_write('waitlist', $waitlist);
+        flash('success', 'Você entrou na fila de espera. Avisaremos se abrir vaga!');
+        $qs = [];
+        if ($bId) $qs['barber_id'] = $bId;
+        if ($dt) $qs['date'] = $dt;
+        redirect(url('cliente/profissional.php' . ($qs ? '?' . http_build_query($qs) : '')));
     }
-    $_SESSION['booking']['services'] = $ids;
+    if (isset($_POST['services'])) {
+        $ids = array_values(array_filter(array_map('intval', $_POST['services'] ?? [])));
+        if (!$ids) {
+            flash('warning', 'Selecione pelo menos um serviço.');
+            redirect(url('cliente/'));
+        }
+        $_SESSION['booking']['services'] = $ids;
+    }
 }
 
 $serviceIds = array_map('intval', $_SESSION['booking']['services'] ?? []);
@@ -54,23 +81,35 @@ $services = services_by_ids($serviceIds);
 $duration = max(60, array_sum(array_map(fn($s) => (int)$s['duration_min'], $services)));
 $primary = $services[0] ?? null;
 
-$week = max(0, (int)($_GET['week'] ?? 0));
+$week = 0; // Travado na semana atual
 $date = $_GET['date'] ?? '';
 $today = date('Y-m-d');
+
+$hojeW = (int)date('w'); // 0 = Domingo, 1 = Segunda, etc.
+$diasAteDomingo = $hojeW === 0 ? 0 : 7 - $hojeW;
+$ultimoDiaSemana = date('Y-m-d', strtotime("+$diasAteDomingo days"));
 
 $diasNomes = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 $dias = [];
 for ($i = 0; $i < 6; $i++) {
-    $ts = strtotime('+' . (($week * 6) + $i) . ' days');
+    $ts = strtotime('+' . $i . ' days');
     $ymd = date('Y-m-d', $ts);
-    $slotsDay = available_slots($barberId, $ymd, $duration);
-    // passado = esgotado
-    $esgotado = $ymd < $today || count($slotsDay) === 0;
+    $slotsDay = [];
+    
+    // passado = esgotado; futuro além de domingo = bloqueado
+    $foraDoLimite = $ymd > $ultimoDiaSemana;
+    if (!$foraDoLimite && $ymd >= $today) {
+        $slotsDay = available_slots($barberId, $ymd, $duration);
+    }
+    
+    $esgotado = $ymd < $today || $foraDoLimite || count($slotsDay) === 0;
+    
     $dias[] = [
         'ymd' => $ymd,
         'label' => date('d/m', $ts) . ' ' . $diasNomes[(int)date('w', $ts)],
         'esgotado' => $esgotado,
         'slots' => $slotsDay,
+        'foraDoLimite' => $foraDoLimite
     ];
 }
 
@@ -148,8 +187,8 @@ client_shell_start('agendar');
     </div>
 
     <div class="booking-days-wrap">
-      <a class="booking-day-nav <?= $week <= 0 ? 'disabled' : '' ?>"
-         href="<?= $week <= 0 ? '#' : ('?week=' . ($week - 1) . '&barber_id=' . $barberId) ?>"
+      <a class="booking-day-nav disabled"
+         href="#" style="visibility: hidden"
          aria-label="Dias anteriores">‹</a>
 
       <div class="booking-days-grid">
@@ -169,7 +208,7 @@ client_shell_start('agendar');
         <?php endforeach; ?>
       </div>
 
-      <a class="booking-day-nav" href="?week=<?= $week + 1 ?>&barber_id=<?= $barberId ?>" aria-label="Próximos dias">›</a>
+      <a class="booking-day-nav disabled" style="visibility: hidden" href="#" aria-label="Próximos dias">›</a>
     </div>
 
     <button type="button" class="booking-barber-select" id="btn-open-barbers">
@@ -236,12 +275,18 @@ client_shell_start('agendar');
       </dialog>
     <?php endif; ?>
 
+    <form method="post" action="" id="form-waitlist">
+      <input type="hidden" name="action" value="join_waitlist">
+      <input type="hidden" name="date" value="<?= e($date) ?>">
+      <input type="hidden" name="barber_id" value="<?= (int)$barberId ?>">
+    </form>
     <form method="post" action="<?= e(url('cliente/confirmar.php')) ?>" id="form-hora">
       <input type="hidden" name="date" value="<?= e($date) ?>">
       <input type="hidden" name="barber_id" value="<?= (int)$barberId ?>">
       <div class="booking-slots">
         <?php if ($selectedDayEsgotado || !$slots): ?>
           <div class="alert-as warning" style="width:100%">Sem horários disponíveis neste dia com este barbeiro.</div>
+          <button type="submit" form="form-waitlist" class="botao-avancar" style="width:100%; margin-top: 15px;">Entrar na Fila de Espera para este dia</button>
         <?php else: ?>
           <?php foreach ($slots as $slot): ?>
             <label class="booking-slot">

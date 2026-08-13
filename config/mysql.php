@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 function db_enabled(): bool
 {
-    return env_bool('DB_ENABLED', false) && env_str('DB_NAME', '') !== '';
+    return \App\DotEnv::getBool('DB_ENABLED', false) && \App\DotEnv::getString('DB_NAME', '') !== '';
 }
 
 function db_table_map(): array
@@ -45,11 +45,11 @@ function db_pdo(): ?PDO
     if (!db_enabled()) {
         return null;
     }
-    $host = env_str('DB_HOST', 'localhost');
-    $name = env_str('DB_NAME', '');
-    $user = env_str('DB_USER', '');
-    $pass = env_str('DB_PASS', '');
-    $port = env_str('DB_PORT', '3306');
+    $host = \App\DotEnv::getString('DB_HOST', 'localhost');
+    $name = \App\DotEnv::getString('DB_NAME', '');
+    $user = \App\DotEnv::getString('DB_USER', '');
+    $pass = \App\DotEnv::getString('DB_PASS', '');
+    $port = \App\DotEnv::getString('DB_PORT', '3306');
     try {
         $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
         $pdo = new PDO($dsn, $user, $pass, [
@@ -124,6 +124,13 @@ function db_row_from_sql(string $logical, array $row): array
         $row['client_id'] = $row['client_id'] !== null ? (int)$row['client_id'] : null;
         $row['service_id'] = $row['service_id'] !== null ? (int)$row['service_id'] : null;
         $row['price'] = (float)$row['price'];
+        // Normaliza DATE/TIME do MySQL para string Y-m-d / H:i (evita falha no filtro da agenda)
+        $row['date'] = substr((string)($row['date'] ?? ''), 0, 10);
+        $t = (string)($row['time'] ?? '');
+        $row['time'] = preg_match('/^\d{2}:\d{2}/', $t) ? substr($t, 0, 5) : $t;
+        $row['rating'] = isset($row['rating']) ? (int)$row['rating'] : null;
+        $row['rating_comment'] = $row['rating_comment'] ?? null;
+        $row['rated_at'] = $row['rated_at'] ?? null;
         return $row;
     }
 
@@ -214,12 +221,14 @@ function db_upsert_settings(PDO $pdo, array $row): void
         primary_color, accent_color, open_time, close_time, lunch_start, lunch_end,
         slot_minutes, lunch_enabled, commission_rate, setup_completed,
         mp_public_key, mp_access_token, wa_phone_number_id, wa_access_token,
+        evo_api_url, evo_api_key, evo_instance, cron_secret,
         loyalty_prata_min, loyalty_ouro_min, loyalty_points_per_real, loyalty_rewards_json
       ) VALUES (
         1, :shop_name, :slug, :phone, :address, :instagram, :maps_url, :logo_url,
         :primary_color, :accent_color, :open_time, :close_time, :lunch_start, :lunch_end,
         :slot_minutes, :lunch_enabled, :commission_rate, :setup_completed,
         :mp_public_key, :mp_access_token, :wa_phone_number_id, :wa_access_token,
+        :evo_api_url, :evo_api_key, :evo_instance, :cron_secret,
         :loyalty_prata_min, :loyalty_ouro_min, :loyalty_points_per_real, :loyalty_rewards_json
       )';
     $stmt = $pdo->prepare($sql);
@@ -245,6 +254,10 @@ function db_upsert_settings(PDO $pdo, array $row): void
         ':mp_access_token' => $row['mp_access_token'] ?? null,
         ':wa_phone_number_id' => $row['wa_phone_number_id'] ?? null,
         ':wa_access_token' => $row['wa_access_token'] ?? null,
+        ':evo_api_url' => $row['evo_api_url'] ?? null,
+        ':evo_api_key' => $row['evo_api_key'] ?? null,
+        ':evo_instance' => $row['evo_instance'] ?? null,
+        ':cron_secret' => $row['cron_secret'] ?? null,
         ':loyalty_prata_min' => (int)($row['loyalty_prata_min'] ?? 100),
         ':loyalty_ouro_min' => (int)($row['loyalty_ouro_min'] ?? 200),
         ':loyalty_points_per_real' => (float)($row['loyalty_points_per_real'] ?? 1),
@@ -354,8 +367,10 @@ function db_insert_row(PDO $pdo, string $logical, string $safeTable, array $row)
         $serviceIds = $row['service_ids'] ?? null;
         $products = $row['products'] ?? [];
         $stmt = $pdo->prepare('INSERT INTO `' . $safeTable . '`
-            (id, client_id, client_name, client_phone, barber_id, service_id, service_ids, products_json, date, time, status, notes, price, created_at)
-            VALUES (:id, :client_id, :client_name, :client_phone, :barber_id, :service_id, :service_ids, :products_json, :date, :time, :status, :notes, :price, :created_at)');
+            (id, client_id, client_name, client_phone, barber_id, service_id, service_ids, products_json, date, time, status, notes, price, created_at, rating, rating_comment, rated_at, reminder_sent_at)
+            VALUES (:id, :client_id, :client_name, :client_phone, :barber_id, :service_id, :service_ids, :products_json, :date, :time, :status, :notes, :price, :created_at, :rating, :rating_comment, :rated_at, :reminder_sent_at)
+            ON DUPLICATE KEY UPDATE
+            client_id=VALUES(client_id), client_name=VALUES(client_name), client_phone=VALUES(client_phone), barber_id=VALUES(barber_id), service_id=VALUES(service_id), service_ids=VALUES(service_ids), products_json=VALUES(products_json), date=VALUES(date), time=VALUES(time), status=VALUES(status), notes=VALUES(notes), price=VALUES(price), created_at=VALUES(created_at), rating=VALUES(rating), rating_comment=VALUES(rating_comment), rated_at=VALUES(rated_at), reminder_sent_at=VALUES(reminder_sent_at)');
         $stmt->execute([
             ':id' => (int)($row['id'] ?? 0) ?: null,
             ':client_id' => isset($row['client_id']) && $row['client_id'] !== null && $row['client_id'] !== '' ? (int)$row['client_id'] : null,
@@ -371,6 +386,12 @@ function db_insert_row(PDO $pdo, string $logical, string $safeTable, array $row)
             ':notes' => $row['notes'] ?? null,
             ':price' => (float)($row['price'] ?? 0),
             ':created_at' => isset($row['created_at']) ? date('Y-m-d H:i:s', strtotime((string)$row['created_at']) ?: time()) : date('Y-m-d H:i:s'),
+            ':rating' => isset($row['rating']) ? (int)$row['rating'] : null,
+            ':rating_comment' => $row['rating_comment'] ?? null,
+            ':rated_at' => $row['rated_at'] ?? null,
+            ':reminder_sent_at' => isset($row['reminder_sent_at']) && $row['reminder_sent_at']
+                ? date('Y-m-d H:i:s', strtotime((string)$row['reminder_sent_at']) ?: time())
+                : null,
         ]);
         return;
     }
@@ -496,6 +517,44 @@ function db_install_schema_if_needed(): void
                 ADD COLUMN loyalty_ouro_min INT NOT NULL DEFAULT 200,
                 ADD COLUMN loyalty_points_per_real DECIMAL(6,2) NOT NULL DEFAULT 1.00,
                 ADD COLUMN loyalty_rewards_json JSON NULL");
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM agendamentos LIKE 'rating'")->fetch();
+        if (!$cols) {
+            $pdo->exec("ALTER TABLE agendamentos
+                ADD COLUMN rating TINYINT UNSIGNED NULL,
+                ADD COLUMN rating_comment VARCHAR(500) NULL,
+                ADD COLUMN rated_at DATETIME NULL");
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM agendamentos LIKE 'reminder_sent_at'")->fetch();
+        if (!$cols) {
+            $pdo->exec('ALTER TABLE agendamentos ADD COLUMN reminder_sent_at DATETIME NULL');
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM configuracoes LIKE 'evo_api_url'")->fetch();
+        if (!$cols) {
+            $pdo->exec("ALTER TABLE configuracoes
+                ADD COLUMN evo_api_url VARCHAR(255) NULL,
+                ADD COLUMN evo_api_key VARCHAR(255) NULL,
+                ADD COLUMN evo_instance VARCHAR(120) NULL");
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM configuracoes LIKE 'cron_secret'")->fetch();
+        if (!$cols) {
+            $pdo->exec('ALTER TABLE configuracoes ADD COLUMN cron_secret VARCHAR(64) NULL');
         }
     } catch (Throwable $e) {
         // ignore

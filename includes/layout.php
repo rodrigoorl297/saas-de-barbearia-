@@ -25,6 +25,7 @@ function render_head(string $title, bool $client = false, ?string $bodyClass = n
   <link rel="apple-touch-icon" href="<?= e($logoHref) ?>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="manifest" href="<?= e(url('manifest.json')) ?>">
   <?php if (!$client): ?>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <?php endif; ?>
@@ -55,6 +56,7 @@ function render_scripts(bool $client = false, bool $barber = false): void
             echo '<script src="' . e(url('assets/js/admin.js')) . '"></script>';
         }
     }
+    echo '<script>if("serviceWorker" in navigator){navigator.serviceWorker.register("' . e(url('sw.js')) . '").catch(console.error);}</script>';
     echo '</body></html>';
 }
 
@@ -182,6 +184,7 @@ function admin_layout_start(string $title, string $role, string $active): void
         'Operação' => [
             'servicos' => ['dono/servicos.php', 'Serviços'],
             'estoque' => ['dono/estoque.php', 'Estoque'],
+            'pdv' => ['dono/pdv.php', 'PDV Caixa'],
             'metas' => ['dono/metas.php', 'Metas'],
         ],
         'Financeiro' => [
@@ -209,15 +212,16 @@ function admin_layout_start(string $title, string $role, string $active): void
     $groups = $role === 'dono' ? $donoGroups : $barbeiroLinks;
     ?>
 <div class="d-flex admin-layout">
-  <aside class="sidebar">
+  <aside class="sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="appSidebar" aria-labelledby="appSidebarLabel">
     <div class="brand">
       <div class="brand-badge brand-badge--logo">
         <img src="<?= e(media_url(product_logo_path())) ?>" alt="<?= e(product_name()) ?>">
       </div>
       <div>
-        <div class="brand-name"><?= e(str_upper(product_name())) ?></div>
+        <div class="brand-name" id="appSidebarLabel"><?= e(str_upper(product_name())) ?></div>
         <small class="text-secondary" style="font-size: 0.7rem;"><?= $role === 'dono' ? 'Painel do Dono · Controle total' : 'Painel do Barbeiro' ?></small>
       </div>
+      <button type="button" class="btn-close btn-close-white ms-auto d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#appSidebar" aria-label="Fechar menu"></button>
     </div>
     <nav class="nav flex-column py-2">
       <?php foreach ($groups as $groupLabel => $links): ?>
@@ -235,9 +239,14 @@ function admin_layout_start(string $title, string $role, string $active): void
   </aside>
   <div class="admin-main">
     <div class="topbar">
-      <div>
-        <div class="fw-bold"><?= e($title) ?></div>
-        <small class="text-secondary">Olá, <?= e($user['name'] ?? '') ?> · <?= $role === 'dono' ? 'Dono' : 'Barbeiro' ?></small>
+      <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn-menu-toggle d-lg-none" data-bs-toggle="offcanvas" data-bs-target="#appSidebar" aria-controls="appSidebar" aria-label="Abrir menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <div>
+          <div class="fw-bold"><?= e($title) ?></div>
+          <small class="text-secondary">Olá, <?= e($user['name'] ?? '') ?> · <?= $role === 'dono' ? 'Dono' : 'Barbeiro' ?></small>
+        </div>
       </div>
       <div class="d-flex gap-2">
         <a class="btn btn-sm btn-ghost" href="<?= e(url('cliente/')) ?>" target="_blank">App do cliente</a>
