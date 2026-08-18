@@ -10,6 +10,10 @@ RewriteRule ^scratch/ - [F,L]
 
 RewriteRule \.env$ - [F,L]
 
+RewriteRule ^sql/ - [F,L]
+
+RewriteRule ^cron/ - [F,L]
+
 
 
 # Se a pasta/arquivo existir, serve normalmente

@@ -1,6 +1,67 @@
 <?php
 declare(strict_types=1);
 
+function env_bool(string $key, bool $default = false): bool
+{
+    return \App\DotEnv::getBool($key, $default);
+}
+
+function env_str(string $key, string $default = ''): string
+{
+    return \App\DotEnv::getString($key, $default);
+}
+
+/**
+ * Criptografia simétrica (AES-256-GCM) para segredos salvos no banco/JSON
+ * (tokens de Mercado Pago/WhatsApp), usando a chave em APP_KEY (.env, nunca no banco).
+ * Sem APP_KEY configurada, retorna o valor original sem alterar — comportamento
+ * idêntico ao anterior à correção, para não quebrar instalações existentes.
+ */
+function secret_encrypt(string $plaintext): string
+{
+    if ($plaintext === '' || !defined('APP_KEY') || APP_KEY === '') {
+        return $plaintext;
+    }
+    $key = base64_decode(APP_KEY, true);
+    if ($key === false || strlen($key) !== 32) {
+        return $plaintext;
+    }
+    $iv = random_bytes(12);
+    $tag = '';
+    $cipher = openssl_encrypt($plaintext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($cipher === false) {
+        return $plaintext;
+    }
+    return 'enc:v1:' . base64_encode($iv . $tag . $cipher);
+}
+
+/**
+ * Reverte secret_encrypt(). Valores sem o prefixo "enc:v1:" são tratados como
+ * texto plano legado (instalações de antes desta correção) e retornados como estão.
+ */
+function secret_decrypt(string $stored): string
+{
+    if (!str_starts_with($stored, 'enc:v1:')) {
+        return $stored;
+    }
+    if (!defined('APP_KEY') || APP_KEY === '') {
+        return '';
+    }
+    $key = base64_decode(APP_KEY, true);
+    if ($key === false || strlen($key) !== 32) {
+        return '';
+    }
+    $raw = base64_decode(substr($stored, 7), true);
+    if ($raw === false || strlen($raw) < 12 + 16) {
+        return '';
+    }
+    $iv = substr($raw, 0, 12);
+    $tag = substr($raw, 12, 16);
+    $cipher = substr($raw, 28);
+    $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    return $plain === false ? '' : $plain;
+}
+
 function e(?string $value): string
 {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
@@ -96,8 +157,27 @@ function settings(bool $reload = false): array
     if ($settings === null) {
         $rows = store_read('settings');
         $settings = $rows[0] ?? [];
+        foreach (['mp_access_token', 'wa_access_token'] as $secretField) {
+            if (!empty($settings[$secretField])) {
+                $settings[$secretField] = secret_decrypt((string) $settings[$secretField]);
+            }
+        }
     }
     return $settings;
+}
+
+/**
+ * Cores da marca da barbearia, validadas (hex simples), com fallback para os
+ * defaults do produto — nunca deixa um valor fora do padrão vazar pro <style>.
+ * @return array{primary: string, accent: string}
+ */
+function brand_colors(): array
+{
+    $s = settings();
+    $isHex = fn($v) => is_string($v) && preg_match('/^#[0-9a-fA-F]{3,8}$/', $v);
+    $primary = $isHex($s['primary_color'] ?? null) ? $s['primary_color'] : '#11172f';
+    $accent = $isHex($s['accent_color'] ?? null) ? $s['accent_color'] : '#c9a227';
+    return ['primary' => $primary, 'accent' => $accent];
 }
 
 /**
@@ -151,12 +231,10 @@ function slugify(string $name): string
     if ($s === '') {
         return 'barbearia';
     }
-    if (function_exists('iconv')) {
-        $t = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
-        if ($t !== false && $t !== '') {
-            $s = $t;
-        }
-    }
+    // Mapa manual primeiro (cobre os acentos comuns em pt-BR de forma previsível).
+    // iconv//TRANSLIT depois, só como rede de segurança para o que sobrar — rodar
+    // iconv antes do mapa quebrava nomes com acento (ex.: "São João" virava
+    // "s-ao-jo-ao"), porque o TRANSLIT já alterava os bytes que o mapa esperava casar.
     $map = [
         'á'=>'a','à'=>'a','ã'=>'a','â'=>'a','ä'=>'a',
         'é'=>'e','è'=>'e','ê'=>'e','ë'=>'e',
@@ -172,6 +250,12 @@ function slugify(string $name): string
         'Ç'=>'c','Ñ'=>'n',
     ];
     $s = strtr($s, $map);
+    if (function_exists('iconv')) {
+        $t = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
+        if ($t !== false && $t !== '') {
+            $s = $t;
+        }
+    }
     $s = strtolower($s);
     $s = preg_replace('/[^a-z0-9]+/', '-', $s) ?? '';
     $s = trim($s, '-');
@@ -553,6 +637,53 @@ function available_slots(int $barberId, string $date, int $durationMin = 60): ar
 }
 
 /**
+ * Verifica se um intervalo [time, time+durationMin) conflita com algum
+ * agendamento ativo do barbeiro nessa data. Usado para revalidar disponibilidade
+ * no momento de gravar (não só no momento de exibir os horários livres).
+ */
+function appointment_slot_conflicts(int $barberId, string $date, string $time, int $durationMin): bool
+{
+    $start = strtotime($date . ' ' . $time);
+    $end = $start + ($durationMin * 60);
+
+    $busy = appointments_enriched(function ($a) use ($barberId, $date) {
+        return (int)$a['barber_id'] === $barberId
+            && $a['date'] === $date
+            && in_array($a['status'], ['agendado', 'confirmado', 'concluido'], true);
+    });
+
+    foreach ($busy as $b) {
+        $bStart = strtotime($date . ' ' . $b['time']);
+        $bEnd = $bStart + ((int)$b['duration_min'] * 60);
+        if ($start < $bEnd && $end > $bStart) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Abre (criando se necessário) e trava com exclusividade o lock de agenda de um
+ * barbeiro específico. Fecha a janela entre checar disponibilidade e gravar.
+ * Sempre libere o lock (flock($lock, LOCK_UN); fclose($lock);) no finally.
+ *
+ * @return resource|false
+ */
+function acquire_barber_agenda_lock(int $barberId)
+{
+    $lockDir = data_dir() . '/locks';
+    if (!is_dir($lockDir)) {
+        mkdir($lockDir, 0775, true);
+    }
+    $lock = fopen($lockDir . '/agenda-barbeiro-' . $barberId . '.lock', 'c');
+    if ($lock === false) {
+        return false;
+    }
+    flock($lock, LOCK_EX);
+    return $lock;
+}
+
+/**
  * Cria ou atualiza cliente (role=cliente). Retorna o usuário salvo.
  */
 function upsert_client(array $data): array
@@ -664,23 +795,38 @@ function book_service_for_client(int $clientId, int $barberId, int $serviceId, s
     }
 
     $duration = max(15, (int)($service['duration_min'] ?? 30));
-    $slots = available_slots($barberId, $date, $duration);
-    if (!in_array($time, $slots, true)) {
-        return 'Horário indisponível para este barbeiro/serviço.';
+
+    // Trava por barbeiro: fecha a janela entre checar disponibilidade e gravar,
+    // evitando dois clientes reservando o mesmo horário simultaneamente.
+    $lock = acquire_barber_agenda_lock($barberId);
+    if ($lock === false) {
+        return 'Não foi possível confirmar o horário. Tente novamente.';
     }
 
-    return save_appointment([
-        'client_id' => $clientId,
-        'client_name' => $client['name'] ?? '',
-        'client_phone' => preg_replace('/\D+/', '', (string)($client['phone'] ?? '')),
-        'barber_id' => $barberId,
-        'service_id' => $serviceId,
-        'service_ids' => [$serviceId],
-        'date' => $date,
-        'time' => $time,
-        'status' => 'agendado',
-        'notes' => null,
-        'price' => (float)($service['price'] ?? 0),
-        'products' => [],
-    ]);
+    try {
+        // Revalida dentro da seção crítica: outro request pode ter reservado
+        // este horário enquanto este aguardava o lock.
+        $slots = available_slots($barberId, $date, $duration);
+        if (!in_array($time, $slots, true)) {
+            return 'Horário indisponível para este barbeiro/serviço.';
+        }
+
+        return save_appointment([
+            'client_id' => $clientId,
+            'client_name' => $client['name'] ?? '',
+            'client_phone' => preg_replace('/\D+/', '', (string)($client['phone'] ?? '')),
+            'barber_id' => $barberId,
+            'service_id' => $serviceId,
+            'service_ids' => [$serviceId],
+            'date' => $date,
+            'time' => $time,
+            'status' => 'agendado',
+            'notes' => null,
+            'price' => (float)($service['price'] ?? 0),
+            'products' => [],
+        ]);
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
 }

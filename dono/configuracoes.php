@@ -30,6 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'lunch_start' => normalize_time($_POST['lunch_start'] ?? '12:00', '12:00'),
         'lunch_end' => normalize_time($_POST['lunch_end'] ?? '13:00', '13:00'),
         'slot_minutes' => max(15, (int)($_POST['slot_minutes'] ?? 60)),
+        'primary_color' => preg_match('/^#[0-9a-fA-F]{6}$/', (string)($_POST['primary_color'] ?? ''))
+            ? $_POST['primary_color'] : ($shop['primary_color'] ?? '#11172f'),
+        'accent_color' => preg_match('/^#[0-9a-fA-F]{6}$/', (string)($_POST['accent_color'] ?? ''))
+            ? $_POST['accent_color'] : ($shop['accent_color'] ?? '#c9a227'),
         'mp_public_key' => trim($_POST['mp_public_key'] ?? ''),
         'mp_access_token' => trim($_POST['mp_access_token'] ?? ''),
         'evo_api_url' => trim($_POST['evo_api_url'] ?? ''),
@@ -90,6 +94,20 @@ admin_layout_start('Configurações', 'dono', 'config');
             <button type="button" class="btn btn-outline-secondary" id="copy-client-link">Copiar</button>
           </div>
           <div class="form-text">Compartilhe este link com os clientes. Ele muda automaticamente quando você altera o nome.</div>
+        </div>
+
+        <hr class="border-secondary opacity-25">
+        <h2 class="h6 mb-0">Cores da marca</h2>
+        <p class="small text-secondary mb-0">Usadas no app do cliente e nos destaques do painel. Se não mudar, mantém o padrão do sistema.</p>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">Cor primária</label>
+            <input type="color" name="primary_color" class="form-control form-control-color" value="<?= e($shop['primary_color'] ?? '#11172f') ?>">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Cor de destaque</label>
+            <input type="color" name="accent_color" class="form-control form-control-color" value="<?= e($shop['accent_color'] ?? '#c9a227') ?>">
+          </div>
         </div>
 
         <hr class="border-secondary opacity-25">

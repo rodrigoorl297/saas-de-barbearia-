@@ -118,7 +118,9 @@ CREATE TABLE IF NOT EXISTS produtos_historico (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_ph_product (product_id),
-  KEY idx_ph_user (user_id)
+  KEY idx_ph_user (user_id),
+  CONSTRAINT fk_ph_product FOREIGN KEY (product_id) REFERENCES produtos (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_ph_user FOREIGN KEY (user_id) REFERENCES usuarios (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Agenda
@@ -144,7 +146,10 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   PRIMARY KEY (id),
   KEY idx_ag_barber_date (barber_id, date),
   KEY idx_ag_date (date),
-  KEY idx_ag_status (status)
+  KEY idx_ag_status (status),
+  CONSTRAINT fk_ag_client FOREIGN KEY (client_id) REFERENCES usuarios (id) ON DELETE SET NULL,
+  CONSTRAINT fk_ag_barber FOREIGN KEY (barber_id) REFERENCES usuarios (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_ag_service FOREIGN KEY (service_id) REFERENCES servicos (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Caixa
@@ -159,7 +164,10 @@ CREATE TABLE IF NOT EXISTS caixa (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NULL,
   PRIMARY KEY (id),
-  KEY idx_caixa_apt (appointment_id)
+  KEY idx_caixa_apt (appointment_id),
+  KEY idx_caixa_created_by (created_by),
+  CONSTRAINT fk_caixa_apt FOREIGN KEY (appointment_id) REFERENCES agendamentos (id) ON DELETE SET NULL,
+  CONSTRAINT fk_caixa_user FOREIGN KEY (created_by) REFERENCES usuarios (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Planos / assinaturas / pagamentos
@@ -177,18 +185,45 @@ CREATE TABLE IF NOT EXISTS planos (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Normalizado (colunas reais em vez de data_json) para permitir consultas diretas
+-- de relatório financeiro (ex.: cobranças vencidas) sem trazer tudo pra PHP.
 CREATE TABLE IF NOT EXISTS assinaturas (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  data_json JSON NOT NULL,
+  client_id INT UNSIGNED NOT NULL,
+  client_phone VARCHAR(32) NULL,
+  plan_id INT UNSIGNED NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  usage_count INT NOT NULL DEFAULT 0,
+  started_at DATE NULL,
+  renews_at DATE NULL,
+  card_id INT UNSIGNED NULL,
+  mp_payment_id VARCHAR(64) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  KEY idx_assinaturas_client (client_id),
+  KEY idx_assinaturas_status_renews (status, renews_at),
+  CONSTRAINT fk_assinaturas_client FOREIGN KEY (client_id) REFERENCES usuarios (id) ON DELETE CASCADE,
+  CONSTRAINT fk_assinaturas_plan FOREIGN KEY (plan_id) REFERENCES planos (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS cobrancas (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  data_json JSON NOT NULL,
+  client_id INT UNSIGNED NOT NULL,
+  plan_id INT UNSIGNED NOT NULL,
+  plan_name VARCHAR(120) NULL,
+  amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  card_last4 VARCHAR(4) NULL,
+  card_brand VARCHAR(40) NULL,
+  date DATE NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'proxima',
+  mp_payment_id VARCHAR(64) NULL,
+  mp_status VARCHAR(40) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  KEY idx_cobrancas_client (client_id),
+  KEY idx_cobrancas_plan_date_status (plan_id, date, status),
+  CONSTRAINT fk_cobrancas_client FOREIGN KEY (client_id) REFERENCES usuarios (id) ON DELETE CASCADE,
+  CONSTRAINT fk_cobrancas_plan FOREIGN KEY (plan_id) REFERENCES planos (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS cartoes_cliente (

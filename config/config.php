@@ -17,8 +17,22 @@ define('APP_SLUG', DotEnv::getString('APP_SLUG', 'barbaflow'));
 define('APP_URL', DotEnv::getString('APP_URL', ''));
 define('DB_PATH', __DIR__ . '/../data/suprema.db');
 define('TIMEZONE', DotEnv::getString('TIMEZONE', 'America/Sao_Paulo'));
-/** Em produção deve ser false. Ative só para demos com CLIENT_DEMO_OPEN=true no .env */
-define('CLIENT_DEMO_OPEN', DotEnv::getBool('CLIENT_DEMO_OPEN', false));
+/** Fail-safe: sem APP_ENV definido no .env, assume produção. */
+define('APP_ENV', DotEnv::getString('APP_ENV', 'production'));
+/**
+ * Em produção deve ser false. Ative só para demos com CLIENT_DEMO_OPEN=true no .env.
+ * Trava adicional: mesmo que alguém deixe CLIENT_DEMO_OPEN=true por engano no .env
+ * de produção, a flag nunca fica ativa quando APP_ENV=production.
+ */
+define('CLIENT_DEMO_OPEN', APP_ENV !== 'production' && DotEnv::getBool('CLIENT_DEMO_OPEN', false));
+/**
+ * Chave para criptografar em repouso os tokens de Mercado Pago/WhatsApp
+ * salvos em Configurações (base64 de 32 bytes). Gere com:
+ *   php -r "echo base64_encode(random_bytes(32));"
+ * Sem essa chave, os tokens continuam sendo salvos em texto plano (comportamento
+ * anterior a esta correção) — configure em produção assim que possível.
+ */
+define('APP_KEY', DotEnv::getString('APP_KEY', ''));
 define('MP_PUBLIC_KEY', DotEnv::getString('MP_PUBLIC_KEY', ''));
 define('MP_ACCESS_TOKEN', DotEnv::getString('MP_ACCESS_TOKEN', ''));
 define('WA_PHONE_NUMBER_ID', DotEnv::getString('WA_PHONE_NUMBER_ID', ''));

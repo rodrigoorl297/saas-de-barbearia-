@@ -259,7 +259,7 @@ function seed_database(): void
 
     store_write('users', [
         ['id' => 1, 'name' => 'Administrador', 'email' => 'admin@loja.local', 'phone' => null, 'password' => $passDono, 'role' => 'dono', 'avatar' => null, 'active' => 1, 'created_at' => date('c')],
-        ['id' => 2, 'name' => 'Barbeiro 1', 'email' => 'barbeiro1@loja.local', 'phone' => '', 'password' => $passBarbeiro, 'role' => 'barbeiro', 'avatar' => null, 'active' => 1, 'created_at' => date('c')],
+        ['id' => 2, 'name' => 'Barbeiro 1', 'email' => 'barbeiro1@loja.local', 'phone' => '', 'password' => $passBarbeiro, 'role' => 'barbeiro', 'avatar' => null, 'active' => 1, 'must_change_password' => 1, 'created_at' => date('c')],
     ]);
 
     $services = [
@@ -674,6 +674,13 @@ function save_settings(array $data): void
             $maps = 'https://' . ltrim($maps, '/');
         }
         $data['maps_url'] = $maps;
+    }
+
+    // Segredos de integração são criptografados antes de persistir (nunca em texto plano).
+    foreach (['mp_access_token', 'wa_access_token'] as $secretField) {
+        if (array_key_exists($secretField, $data)) {
+            $data[$secretField] = secret_encrypt((string) $data[$secretField]);
+        }
     }
 
     $rows = store_read('settings');
