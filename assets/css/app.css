@@ -2199,7 +2199,6 @@ body.is-client .booking-addon-meta span {
   --bs-table-border-color: #f1f5f9;
   color: #0f172a;
   margin: 0;
-  table-layout: fixed;
   width: 100%;
 }
 .stock-table thead th {
@@ -2217,6 +2216,7 @@ body.is-client .booking-addon-meta span {
   padding: 0.75rem 0.85rem;
   vertical-align: middle;
   border-color: #f1f5f9;
+  white-space: nowrap;
 }
 .stock-table .col-prod { width: 34%; }
 .stock-table .col-num { width: 9%; }

@@ -29,6 +29,7 @@ function db_table_map(): array
         'loyalty' => 'fidelidade',
         'goals' => 'metas',
         'notifications' => 'avisos',
+        'waitlist' => 'fila_espera',
     ];
 }
 
@@ -74,7 +75,7 @@ function db_physical_table(string $logical): string
 function db_is_json_blob_table(string $logical): bool
 {
     return in_array($logical, [
-        'subscriptions', 'charges', 'client_cards', 'campaigns', 'loyalty', 'goals', 'notifications',
+        'subscriptions', 'charges', 'client_cards', 'campaigns', 'loyalty', 'goals', 'notifications', 'waitlist'
     ], true);
 }
 
@@ -556,6 +557,11 @@ function db_install_schema_if_needed(): void
         if (!$cols) {
             $pdo->exec('ALTER TABLE configuracoes ADD COLUMN cron_secret VARCHAR(64) NULL');
         }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS fila_espera ( id INT NOT NULL AUTO_INCREMENT, data_json JSON NOT NULL, PRIMARY KEY (id) ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
     } catch (Throwable $e) {
         // ignore
     }
