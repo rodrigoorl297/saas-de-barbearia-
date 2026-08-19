@@ -22,4 +22,6 @@ jobs:
             | xargs -0 -n1 php -l
 
       - name: Testes
-        run: php tests/run.php
+        run: |
+          php tests/run.php
+          php tests/integration.php

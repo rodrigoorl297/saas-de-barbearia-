@@ -36,6 +36,23 @@ require __DIR__ . '/../config/database.php';
 require __DIR__ . '/../includes/functions.php';
 require __DIR__ . '/../includes/auth.php';
 
+if (!store_read('users')) {
+    seed_database();
+}
+ensure_extra_tables();
+if (!store_read('stock')) {
+    store_write('stock', [[
+        'id' => 1,
+        'name' => 'Produto de integração',
+        'sku' => 'TEST-01',
+        'qty' => 3,
+        'min_qty' => 1,
+        'cost' => 5,
+        'price' => 10,
+        'active' => 1,
+    ]]);
+}
+
 $passed = 0;
 $failed = 0;
 
