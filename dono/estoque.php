@@ -12,19 +12,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $item = [
             'name' => trim($_POST['name'] ?? ''),
             'sku' => trim($_POST['sku'] ?? ''),
-            'qty' => (int)($_POST['qty'] ?? 0),
-            'min_qty' => (int)($_POST['min_qty'] ?? 0),
-            'cost' => (float)($_POST['cost'] ?? 0),
-            'price' => (float)($_POST['price'] ?? 0),
+            'qty' => max(0, (int)($_POST['qty'] ?? 0)),
+            'min_qty' => max(0, (int)($_POST['min_qty'] ?? 0)),
+            'cost' => max(0, (float)($_POST['cost'] ?? 0)),
+            'price' => max(0, (float)($_POST['price'] ?? 0)),
             'active' => 1,
         ];
         if ($item['name'] !== '') {
             if ($id > 0) {
+                $found = false;
                 foreach ($rows as $i => $r) {
                     if ((int)$r['id'] === $id) {
                         $rows[$i] = array_merge($r, $item);
+                        $found = true;
                         break;
                     }
+                }
+                if (!$found) {
+                    flash('danger', 'Produto não encontrado.');
+                    redirect(url('dono/estoque.php'));
                 }
             } else {
                 $item['id'] = store_next_id('stock');
@@ -36,8 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($action === 'move') {
         $id = (int)$_POST['id'];
-        $qty = (int)($_POST['move_qty'] ?? 0);
-        $type = $_POST['move_type'] ?? '';
+        $qty = max(0, (int)($_POST['move_qty'] ?? 0));
+        $type = (string)($_POST['move_type'] ?? '');
 
         $delta = 0;
         if ($type === 'in_compra') {
@@ -46,32 +52,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $delta = -$qty;
         }
 
-        if ($delta !== 0) {
-            $prodName = '';
-            foreach ($rows as $i => $r) {
-                if ((int)$r['id'] === $id) {
-                    $rows[$i]['qty'] = max(0, (int)$r['qty'] + $delta);
-                    $prodName = $r['name'];
-                    break;
-                }
-            }
-            store_write('stock', $rows);
-
-            $history = store_read('stock_history');
-            $history[] = [
-                'id' => store_next_id('stock_history'),
-                'product_id' => $id,
-                'product_name' => $prodName,
-                'qty' => $qty,
-                'delta' => $delta,
-                'type' => $type,
-                'date' => date('Y-m-d H:i:s'),
-            ];
-            store_write('stock_history', $history);
-            flash('success', 'Movimentação registrada com sucesso.');
-        } else {
-            flash('danger', 'Quantidade inválida.');
+        if ($delta === 0) {
+            flash('danger', 'Quantidade ou tipo de movimentação inválido.');
+            redirect(url('dono/estoque.php'));
         }
+
+        $productIndex = null;
+        foreach ($rows as $i => $r) {
+            if ((int)($r['id'] ?? 0) === $id) {
+                $productIndex = $i;
+                break;
+            }
+        }
+        if ($productIndex === null) {
+            flash('danger', 'Produto não encontrado.');
+            redirect(url('dono/estoque.php'));
+        }
+        if ($delta < 0 && $qty > (int)($rows[$productIndex]['qty'] ?? 0)) {
+            flash('danger', 'Estoque insuficiente (' . (int)($rows[$productIndex]['qty'] ?? 0) . ' disponível).');
+            redirect(url('dono/estoque.php'));
+        }
+
+        $prodName = (string)($rows[$productIndex]['name'] ?? 'Produto');
+        $rows[$productIndex]['qty'] = (int)$rows[$productIndex]['qty'] + $delta;
+        store_write('stock', $rows);
+
+        $history = store_read('stock_history');
+        $history[] = [
+            'id' => store_next_id('stock_history'),
+            'product_id' => $id,
+            'product_name' => $prodName,
+            'qty' => $qty,
+            'delta' => $delta,
+            'type' => $type,
+            'date' => date('Y-m-d H:i:s'),
+        ];
+        store_write('stock_history', $history);
+        flash('success', 'Movimentação registrada com sucesso.');
     }
     redirect(url('dono/estoque.php'));
 }
@@ -191,30 +208,30 @@ admin_layout_start('Estoque', 'dono', 'estoque');
           <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
           <div>
             <label class="form-label">Nome</label>
-            <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>" placeholder="Ex: Pomada modeladora">
+            <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>" placeholder="Ex: Pomada modeladora" aria-label="Nome do produto">
           </div>
           <div>
             <label class="form-label">SKU</label>
-            <input name="sku" class="form-control" value="<?= e($edit['sku'] ?? '') ?>" placeholder="Ex: POM-01">
+            <input name="sku" class="form-control" value="<?= e($edit['sku'] ?? '') ?>" placeholder="Ex: POM-01" aria-label="SKU do produto">
           </div>
           <div class="row g-2">
             <div class="col-6">
               <label class="form-label">Quantidade</label>
-              <input type="number" name="qty" class="form-control" value="<?= (int)($edit['qty'] ?? 0) ?>">
+              <input type="number" name="qty" class="form-control" min="0" value="<?= (int)($edit['qty'] ?? 0) ?>" aria-label="Quantidade em estoque">
             </div>
             <div class="col-6">
               <label class="form-label">Estoque mínimo</label>
-              <input type="number" name="min_qty" class="form-control" value="<?= (int)($edit['min_qty'] ?? 5) ?>">
+              <input type="number" name="min_qty" class="form-control" min="0" value="<?= (int)($edit['min_qty'] ?? 5) ?>" aria-label="Estoque mínimo">
             </div>
           </div>
           <div class="row g-2">
             <div class="col-6">
               <label class="form-label">Custo (R$)</label>
-              <input type="number" step="0.01" name="cost" class="form-control" value="<?= e((string)($edit['cost'] ?? 0)) ?>">
+              <input type="number" step="0.01" min="0" name="cost" class="form-control" value="<?= e((string)($edit['cost'] ?? 0)) ?>" aria-label="Custo do produto">
             </div>
             <div class="col-6">
               <label class="form-label">Venda (R$)</label>
-              <input type="number" step="0.01" name="price" class="form-control" value="<?= e((string)($edit['price'] ?? 0)) ?>">
+              <input type="number" step="0.01" min="0" name="price" class="form-control" value="<?= e((string)($edit['price'] ?? 0)) ?>" aria-label="Preço de venda">
             </div>
           </div>
           <div class="d-flex gap-2 justify-content-end pt-1">
@@ -246,11 +263,11 @@ admin_layout_start('Estoque', 'dono', 'estoque');
           <input type="hidden" name="id" value="<?= (int)$i['id'] ?>">
           <div>
             <label class="form-label">Quantidade</label>
-            <input type="number" name="move_qty" class="form-control" required min="1" placeholder="Ex: 5">
+            <input type="number" name="move_qty" class="form-control" required min="1" placeholder="Ex: 5" aria-label="Quantidade de <?= e($i['name']) ?>">
           </div>
           <div>
             <label class="form-label">Motivo / Tipo</label>
-            <select name="move_type" class="form-select" required>
+            <select name="move_type" class="form-select" required aria-label="Tipo de movimentação de <?= e($i['name']) ?>">
               <option value="in_compra">Entrada (+ Compra)</option>
               <option value="out_venda">Saída (− Venda)</option>
               <option value="out_uso">Saída (− Uso na bancada)</option>

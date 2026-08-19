@@ -14,7 +14,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim($_POST['name'] ?? '');
         $phone = preg_replace('/\D/', '', $_POST['phone'] ?? '');
         $birth_date = trim($_POST['birth_date'] ?? '');
-        $serviceId = (int)($_POST['service_id'] ?? 0);
+        $serviceIdsInput = $_POST['service_ids'] ?? [];
+        $serviceIds = is_array($serviceIdsInput)
+            ? array_values(array_unique(array_filter(array_map('intval', $serviceIdsInput))))
+            : [];
+        $pickedServices = services_by_ids($serviceIds);
+        $serviceIds = array_values(array_map(static fn($service) => (int)$service['id'], $pickedServices));
+        $serviceId = (int)($serviceIds[0] ?? 0);
         $barberId = (int)($_POST['barber_id'] ?? 0);
         $date = trim($_POST['date'] ?? $today);
         $time = trim($_POST['time'] ?? '');
@@ -26,13 +32,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(url('dono/clientes.php'));
         }
 
-        if ($wantBook && ($serviceId < 1 || $barberId < 1 || $time === '')) {
-            flash('danger', 'Para agendar, informe serviço, barbeiro e horário.');
+        if ($wantBook && (!$pickedServices || $barberId < 1 || $time === '')) {
+            flash('danger', 'Para agendar, selecione ao menos um serviço, barbeiro e horário.');
             redirect(url('dono/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
         
-        if ($wantNow && ($serviceId < 1 || $barberId < 1)) {
-            flash('danger', 'Para registrar o corte, informe serviço e barbeiro.');
+        if ($wantNow && (!$pickedServices || $barberId < 1)) {
+            flash('danger', 'Para iniciar o atendimento, selecione ao menos um serviço e o barbeiro.');
+            redirect(url('dono/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
+        }
+
+        $selectedBarber = ($wantBook || $wantNow) ? find_user_by_id($barberId) : null;
+        if (($wantBook || $wantNow)
+            && (!$selectedBarber || ($selectedBarber['role'] ?? '') !== 'barbeiro' || empty($selectedBarber['active']))) {
+            flash('danger', 'Selecione um barbeiro válido.');
             redirect(url('dono/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
 
@@ -50,8 +63,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $msg = $id > 0 ? 'Cliente atualizado.' : 'Cliente cadastrado.';
         if ($wantBook || $wantNow) {
-            $svc = find_service($serviceId);
-            $barber = find_user_by_id($barberId);
+            $barber = $selectedBarber;
+            $servicesTotal = array_sum(array_map(static fn($service) => (float)($service['price'] ?? 0), $pickedServices));
+            $serviceNames = implode(' + ', array_map(static fn($service) => (string)$service['name'], $pickedServices));
             
             if ($wantNow) {
                 $nowTime = date('H:i');
@@ -61,23 +75,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'client_phone' => $client['phone'],
                     'barber_id' => $barberId,
                     'service_id' => $serviceId,
-                    'service_ids' => [$serviceId],
+                    'service_ids' => $serviceIds,
                     'date' => $today,
                     'time' => $nowTime,
                     'status' => 'em_andamento',
                     'notes' => 'Walk-in',
-                    'price' => (float)($svc['price'] ?? 0),
+                    'price' => $servicesTotal,
                     'products' => [],
                 ]);
-                flash('success', $msg . ' Atendimento iniciado e marcado como Em andamento.');
+                flash('success', $msg . ' Atendimento iniciado e marcado como Em andamento. Total: ' . money($servicesTotal) . '.');
                 redirect(url('dono/agenda.php?date=' . urlencode($today)));
             } else {
-                $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
+                $booked = book_services_for_client((int)$client['id'], $barberId, $serviceIds, $date, $time);
                 if (is_string($booked)) {
                     flash('warning', $msg . ' Agendamento não criado: ' . $booked);
                     redirect(url('dono/clientes.php'));
                 }
-                $msg .= ' Agendado: ' . ($svc['name'] ?? 'serviço') . ' com ' . ($barber['name'] ?? 'barbeiro') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '.';
+                $msg .= ' Agendado: ' . ($serviceNames ?: 'serviço') . ' com ' . ($barber['name'] ?? 'barbeiro') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '. Total: ' . money($servicesTotal) . '.';
                 flash('success', $msg);
                 redirect(url('dono/agenda.php?date=' . urlencode($date)));
             }
@@ -120,7 +134,7 @@ if (isset($_GET['edit'])) {
 }
 
 $formBarber = (int)($_GET['barber_id'] ?? ($barbers[0]['id'] ?? 0));
-$formDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['date'] ?? '')) ? (string)$_GET['date'] : $today;
+$formDate = is_valid_iso_date((string)($_GET['date'] ?? '')) ? (string)$_GET['date'] : $today;
 $formService = (int)($_GET['service_id'] ?? ($services[0]['id'] ?? 0));
 $formDuration = 60;
 foreach ($services as $s) {
@@ -205,18 +219,18 @@ admin_layout_start('Clientes', 'dono', 'clientes');
           <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
           <div>
             <label class="form-label">Nome</label>
-            <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>">
+            <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>" aria-label="Nome do cliente">
           </div>
           <div>
             <label class="form-label">Telefone (WhatsApp)</label>
-            <input name="phone" class="form-control" required value="<?= e($edit['phone'] ?? '') ?>" placeholder="Ex: 11999999999">
+            <input name="phone" class="form-control" required value="<?= e($edit['phone'] ?? '') ?>" placeholder="Ex: 11999999999" aria-label="Telefone do cliente">
             <?php if (!$edit): ?>
               <div class="form-text">Senha inicial do cliente = telefone.</div>
             <?php endif; ?>
           </div>
           <div>
             <label class="form-label">Data de nascimento (opcional)</label>
-            <input type="date" name="birth_date" class="form-control" value="<?= e($edit['birth_date'] ?? '') ?>">
+            <input type="date" name="birth_date" class="form-control" value="<?= e($edit['birth_date'] ?? '') ?>" aria-label="Data de nascimento">
           </div>
 
           <hr class="my-1">
@@ -236,20 +250,40 @@ admin_layout_start('Clientes', 'dono', 'clientes');
           <p class="form-text mb-2" id="tabHint">Salva só os dados do cliente.</p>
 
           <div id="bookFields" class="d-none">
-            <div>
-              <label class="form-label">Tipo de serviço</label>
-              <select name="service_id" id="bookService" class="form-select">
-                <option value="">Selecione…</option>
+            <fieldset class="client-service-fieldset">
+              <legend class="form-label">Serviços</legend>
+              <p class="form-text mt-0 mb-2">Selecione tudo que será realizado.</p>
+              <div class="client-service-picker">
                 <?php foreach ($services as $s): ?>
-                  <option value="<?= (int)$s['id'] ?>" data-duration="<?= (int)$s['duration_min'] ?>" <?= $formService === (int)$s['id'] ? 'selected' : '' ?>>
-                    <?= e($s['name']) ?> · <?= e(money((float)$s['price'])) ?>
-                  </option>
+                  <label class="client-service-option">
+                    <input
+                      type="checkbox"
+                      name="service_ids[]"
+                      value="<?= (int)$s['id'] ?>"
+                      data-price="<?= e((string)$s['price']) ?>"
+                      data-duration="<?= max(15, (int)($s['duration_min'] ?? 30)) ?>"
+                      class="form-check-input client-service-input"
+                      <?= $formService === (int)$s['id'] ? 'checked' : '' ?>
+                    >
+                    <span class="client-service-copy">
+                      <strong><?= e($s['name']) ?></strong>
+                      <small><?= max(15, (int)($s['duration_min'] ?? 30)) ?> min</small>
+                    </span>
+                    <span class="client-service-price"><?= e(money((float)$s['price'])) ?></span>
+                  </label>
                 <?php endforeach; ?>
-              </select>
-            </div>
+                <?php if (!$services): ?>
+                  <div class="empty-state py-3"><strong>Nenhum serviço ativo</strong><p>Cadastre ou ative um serviço antes de iniciar um atendimento.</p></div>
+                <?php endif; ?>
+              </div>
+              <div class="client-service-summary" aria-live="polite">
+                <span id="serviceSelectionMeta">Nenhum serviço selecionado</span>
+                <strong id="serviceSelectionTotal">Total: R$ 0,00</strong>
+              </div>
+            </fieldset>
             <div class="mt-3">
               <label class="form-label">Barbeiro</label>
-              <select name="barber_id" id="bookBarber" class="form-select">
+              <select name="barber_id" id="bookBarber" class="form-select" aria-label="Barbeiro">
                 <option value="">Selecione…</option>
                 <?php foreach ($barbers as $b): ?>
                   <option value="<?= (int)$b['id'] ?>" <?= $formBarber === (int)$b['id'] ? 'selected' : '' ?>><?= e($b['name']) ?></option>
@@ -262,11 +296,11 @@ admin_layout_start('Clientes', 'dono', 'clientes');
             <div class="row g-2 mt-1">
               <div class="col-6">
                 <label class="form-label">Data</label>
-                <input type="date" name="date" id="bookDate" class="form-control" value="<?= e($formDate) ?>">
+                <input type="date" name="date" id="bookDate" class="form-control" value="<?= e($formDate) ?>" aria-label="Data do atendimento">
               </div>
               <div class="col-6">
                 <label class="form-label">Horário</label>
-                <select name="time" id="bookTime" class="form-select">
+                <select name="time" id="bookTime" class="form-select" aria-label="Horário do atendimento">
                   <option value="">Selecione…</option>
                   <?php foreach ($formSlots as $slot): ?>
                     <option value="<?= e($slot) ?>"><?= e($slot) ?></option>
@@ -301,13 +335,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const alsoBookHidden = document.getElementById('alsoBookHidden');
   const cutNowHidden = document.getElementById('cutNowHidden');
   const book = document.getElementById('bookFields');
-  const svc = document.getElementById('bookService');
+  const serviceInputs = Array.from(document.querySelectorAll('.client-service-input'));
+  const serviceMeta = document.getElementById('serviceSelectionMeta');
+  const serviceTotal = document.getElementById('serviceSelectionTotal');
   const barber = document.getElementById('bookBarber');
   const date = document.getElementById('bookDate');
   const time = document.getElementById('bookTime');
   const tabHint = document.getElementById('tabHint');
   const submitBtn = document.getElementById('submitBtn');
   const slotsUrl = <?= json_encode(url('api/slots.php')) ?>;
+  const moneyFormat = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
   let activeTab = 'save';
 
   const hints = {
@@ -344,11 +381,10 @@ document.addEventListener('DOMContentLoaded', () => {
         time.closest('.col-6').classList.toggle('d-none', isNow);
     }
 
-    [svc, barber].forEach((el) => {
-      if (!el) return;
-      if (on) el.setAttribute('required', 'required');
-      else el.removeAttribute('required');
-    });
+    if (barber) {
+      if (on) barber.setAttribute('required', 'required');
+      else barber.removeAttribute('required');
+    }
 
     [date, time].forEach((el) => {
       if (!el) return;
@@ -356,21 +392,43 @@ document.addEventListener('DOMContentLoaded', () => {
       else el.removeAttribute('required');
     });
 
+    updateServiceSummary();
     if (isBook) loadSlots();
+  }
+
+  function selectedServices() {
+    return serviceInputs.filter((input) => input.checked);
+  }
+
+  function updateServiceSummary() {
+    const selected = selectedServices();
+    const total = selected.reduce((sum, input) => sum + Number(input.dataset.price || 0), 0);
+    const duration = selected.reduce((sum, input) => sum + Number(input.dataset.duration || 0), 0);
+    const count = selected.length;
+    if (serviceMeta) {
+      serviceMeta.textContent = count
+        ? `${count} serviço${count === 1 ? '' : 's'} · ${duration} min`
+        : 'Nenhum serviço selecionado';
+    }
+    if (serviceTotal) serviceTotal.textContent = `Total: ${moneyFormat.format(total)}`;
+    if (serviceInputs[0]) {
+      serviceInputs[0].setCustomValidity(activeTab !== 'save' && count === 0 ? 'Selecione ao menos um serviço.' : '');
+    }
   }
 
   async function loadSlots() {
     if (!time) return;
     const bid = barber?.value || '';
     const d = date?.value || '';
-    const sid = svc?.value || '';
-    if (!bid || !d) {
+    const selected = selectedServices();
+    if (!bid || !d || !selected.length) {
       time.innerHTML = '<option value=\"\">Selecione…</option>';
       return;
     }
     time.innerHTML = '<option value=\"\">Carregando…</option>';
     try {
-      const q = new URLSearchParams({ barber_id: bid, date: d, service_id: sid });
+      const q = new URLSearchParams({ barber_id: bid, date: d });
+      selected.forEach((input) => q.append('service_ids[]', input.value));
       const res = await fetch(slotsUrl + '?' + q.toString(), { credentials: 'same-origin', cache: 'no-store' });
       const data = await res.json();
       const slots = Array.isArray(data.slots) ? data.slots : [];
@@ -386,7 +444,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   tabs.forEach((btn) => btn.addEventListener('click', () => setTab(btn.dataset.tab || 'save')));
-  [svc, barber, date].forEach((el) => el && el.addEventListener('change', () => {
+  serviceInputs.forEach((input) => input.addEventListener('change', () => {
+      updateServiceSummary();
+      if (activeTab === 'book') loadSlots();
+  }));
+  [barber, date].forEach((el) => el && el.addEventListener('change', () => {
       if (activeTab === 'book') loadSlots();
   }));
   setTab('save');

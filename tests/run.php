@@ -58,6 +58,12 @@ echo "== normalize_time ==\n";
 check('HH:MM válido passa direto', normalize_time('08:30') === '08:30');
 check('HH:MM:SS é truncado para HH:MM', normalize_time('08:30:00') === '08:30');
 check('valor inválido usa o fallback', normalize_time('não é hora', '09:00') === '09:00');
+check('hora fora do intervalo usa o fallback', normalize_time('99:99', '09:00') === '09:00');
+
+echo "== is_valid_iso_date ==\n";
+check('aceita uma data real no formato ISO', is_valid_iso_date('2024-02-29'));
+check('rejeita dia inexistente', !is_valid_iso_date('2026-02-30'));
+check('rejeita formato diferente de ISO', !is_valid_iso_date('30/08/2026'));
 
 echo "== status_label ==\n";
 check('status conhecido traduz para rótulo em pt-BR', status_label('confirmado') === 'Confirmado');
@@ -67,6 +73,8 @@ check('status desconhecido é devolvido sem alteração', status_label('xyz') ==
 echo "== wa_mask_phone (log de campanhas) ==\n";
 check('mantém DDI+DDD e os 2 últimos dígitos, mascara o meio', wa_mask_phone('5511987654321') === '5511*******21');
 check('telefone curto vira só asteriscos', wa_mask_phone('999') === '***');
+check('telefone de cinco dígitos não causa erro', wa_mask_phone('12345') === '*****');
+check('telefone de seis dígitos não expõe parte do número', wa_mask_phone('123456') === '******');
 
 echo "== App\\DotEnv ==\n";
 putenv('TEST_BOOL_TRUE=true');

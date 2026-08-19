@@ -15,14 +15,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = $_POST['password'] ?? '';
         $active = isset($_POST['active']) ? 1 : 0;
 
-        $work_start = $_POST['work_start'] ?? '';
-        $work_end = $_POST['work_end'] ?? '';
-        $lunch_start = $_POST['lunch_start'] ?? '';
-        $lunch_end = $_POST['lunch_end'] ?? '';
-        $work_days = isset($_POST['work_days']) && is_array($_POST['work_days']) ? array_map('intval', $_POST['work_days']) : [1, 2, 3, 4, 5, 6];
+        $work_start = normalize_time((string)($_POST['work_start'] ?? ''), '08:00');
+        $work_end = normalize_time((string)($_POST['work_end'] ?? ''), '20:00');
+        $lunch_start = normalize_time((string)($_POST['lunch_start'] ?? ''), '12:00');
+        $lunch_end = normalize_time((string)($_POST['lunch_end'] ?? ''), '13:00');
+        $work_days = isset($_POST['work_days']) && is_array($_POST['work_days'])
+            ? array_values(array_unique(array_filter(array_map('intval', $_POST['work_days']), static fn($day) => $day >= 0 && $day <= 6)))
+            : [1, 2, 3, 4, 5, 6];
 
         if ($name && $email) {
             $cur = $id > 0 ? find_user_by_id($id) : null;
+            if ($id > 0 && (!$cur || ($cur['role'] ?? '') !== 'barbeiro')) {
+                flash('danger', 'Barbeiro não encontrado.');
+                redirect(url('dono/barbeiros.php'));
+            }
             $avatar = $cur['avatar'] ?? null;
             $uploaded = upload_image($_FILES['avatar'] ?? [], 'barbeiros');
             if ($uploaded) {
@@ -176,26 +182,26 @@ admin_layout_start('Barbeiros', 'dono', 'barbeiros');
 
           <div class="js-image-upload">
             <label class="form-label">Foto</label>
-            <input type="file" name="avatar" class="form-control" accept="image/*">
+            <input type="file" name="avatar" class="form-control" accept="image/*" aria-label="Foto do barbeiro">
           </div>
           <div class="row g-2">
             <div class="col-md-6">
               <label class="form-label">Nome</label>
-              <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>">
+              <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>" aria-label="Nome do barbeiro">
             </div>
             <div class="col-md-6">
               <label class="form-label">E-mail (login)</label>
-              <input type="email" name="email" class="form-control" required value="<?= e($edit['email'] ?? '') ?>">
+              <input type="email" name="email" class="form-control" required value="<?= e($edit['email'] ?? '') ?>" aria-label="E-mail do barbeiro">
             </div>
           </div>
           <div class="row g-2">
             <div class="col-md-6">
               <label class="form-label">Telefone</label>
-              <input name="phone" class="form-control" value="<?= e($edit['phone'] ?? '') ?>">
+              <input name="phone" class="form-control" value="<?= e($edit['phone'] ?? '') ?>" aria-label="Telefone do barbeiro">
             </div>
             <div class="col-md-6">
               <label class="form-label">Senha <?= $edit ? '(vazio = manter)' : '' ?></label>
-              <input type="password" name="password" class="form-control" <?= $edit ? '' : 'required' ?>>
+              <input type="password" name="password" class="form-control" <?= $edit ? '' : 'required' ?> aria-label="Senha do barbeiro">
             </div>
           </div>
           <div class="form-check">
@@ -208,19 +214,19 @@ admin_layout_start('Barbeiros', 'dono', 'barbeiros');
           <div class="row g-2">
             <div class="col-6">
               <label class="form-label">Início</label>
-              <input type="time" name="work_start" class="form-control" value="<?= e($edit['work_start'] ?? '08:00') ?>">
+              <input type="time" name="work_start" class="form-control" value="<?= e($edit['work_start'] ?? '08:00') ?>" aria-label="Início do expediente">
             </div>
             <div class="col-6">
               <label class="form-label">Fim</label>
-              <input type="time" name="work_end" class="form-control" value="<?= e($edit['work_end'] ?? '20:00') ?>">
+              <input type="time" name="work_end" class="form-control" value="<?= e($edit['work_end'] ?? '20:00') ?>" aria-label="Fim do expediente">
             </div>
             <div class="col-6">
               <label class="form-label">Almoço início</label>
-              <input type="time" name="lunch_start" class="form-control" value="<?= e($edit['lunch_start'] ?? '12:00') ?>">
+              <input type="time" name="lunch_start" class="form-control" value="<?= e($edit['lunch_start'] ?? '12:00') ?>" aria-label="Início do almoço">
             </div>
             <div class="col-6">
               <label class="form-label">Almoço fim</label>
-              <input type="time" name="lunch_end" class="form-control" value="<?= e($edit['lunch_end'] ?? '13:00') ?>">
+              <input type="time" name="lunch_end" class="form-control" value="<?= e($edit['lunch_end'] ?? '13:00') ?>" aria-label="Fim do almoço">
             </div>
           </div>
           <div>

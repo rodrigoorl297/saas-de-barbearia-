@@ -45,7 +45,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect(url('dono/configuracoes.php'));
 }
 
-$previewSlots = available_slots(2, date('Y-m-d'), 60);
+$previewBarbers = active_barbers();
+$previewBarberId = (int)($previewBarbers[0]['id'] ?? 0);
+$previewSlots = $previewBarberId > 0 ? available_slots($previewBarberId, date('Y-m-d'), 60) : [];
 
 admin_layout_start('Configurações', 'dono', 'config');
 ?>
@@ -78,13 +80,13 @@ admin_layout_start('Configurações', 'dono', 'config');
             <div class="col">
                 <label class="form-label">Logo no app do cliente</label>
                 <div class="js-image-upload">
-                  <input type="file" name="logo" class="form-control" accept="image/*">
+                  <input type="file" name="logo" class="form-control" accept="image/*" aria-label="Logo no app do cliente">
                 </div>
             </div>
         </div>
         <div>
           <label class="form-label">Nome no app do cliente</label>
-          <input name="shop_name" class="form-control" required value="<?= e($shop['shop_name']) ?>" placeholder="Ex: Barbearia do João">
+          <input name="shop_name" class="form-control" required value="<?= e($shop['shop_name']) ?>" placeholder="Ex: Barbearia do João" aria-label="Nome no app do cliente">
           <div class="form-text">Esse nome vira o link público do app (slug).</div>
         </div>
         <div>
@@ -102,21 +104,21 @@ admin_layout_start('Configurações', 'dono', 'config');
         <div class="row g-2">
           <div class="col-6">
             <label class="form-label">Cor primária</label>
-            <input type="color" name="primary_color" class="form-control form-control-color" value="<?= e($shop['primary_color'] ?? '#11172f') ?>">
+            <input type="color" name="primary_color" class="form-control form-control-color" value="<?= e($shop['primary_color'] ?? '#11172f') ?>" aria-label="Cor primária">
           </div>
           <div class="col-6">
             <label class="form-label">Cor de destaque</label>
-            <input type="color" name="accent_color" class="form-control form-control-color" value="<?= e($shop['accent_color'] ?? '#c9a227') ?>">
+            <input type="color" name="accent_color" class="form-control form-control-color" value="<?= e($shop['accent_color'] ?? '#c9a227') ?>" aria-label="Cor de destaque">
           </div>
         </div>
 
         <hr class="border-secondary opacity-25">
         <h2 class="h6 mb-0">Dados da barbearia</h2>
-        <div><label class="form-label">Telefone</label><input name="phone" class="form-control" value="<?= e($shop['phone'] ?? '') ?>"></div>
-        <div><label class="form-label">Endereço</label><input name="address" class="form-control" value="<?= e($shop['address'] ?? '') ?>"></div>
+        <div><label class="form-label">Telefone</label><input name="phone" class="form-control" value="<?= e($shop['phone'] ?? '') ?>" aria-label="Telefone da barbearia"></div>
+        <div><label class="form-label">Endereço</label><input name="address" class="form-control" value="<?= e($shop['address'] ?? '') ?>" aria-label="Endereço da barbearia"></div>
         <div>
           <label class="form-label">Instagram (link completo do perfil)</label>
-          <input name="instagram" class="form-control" placeholder="https://www.instagram.com/sua_barbearia/" value="<?= e($shop['instagram'] ?? '') ?>">
+          <input name="instagram" class="form-control" placeholder="https://www.instagram.com/sua_barbearia/" value="<?= e($shop['instagram'] ?? '') ?>" aria-label="Link do Instagram">
           <?php
             $igPreview = normalize_external_url((string)($shop['instagram'] ?? ''), 'instagram');
           ?>
@@ -131,12 +133,12 @@ admin_layout_start('Configurações', 'dono', 'config');
         </div>
         <div>
           <label class="form-label">Link do Google Maps (Localização)</label>
-          <input name="maps_url" class="form-control" placeholder="https://maps.app.goo.gl/..." value="<?= e($shop['maps_url'] ?? '') ?>">
+          <input name="maps_url" class="form-control" placeholder="https://maps.app.goo.gl/..." value="<?= e($shop['maps_url'] ?? '') ?>" aria-label="Link do Google Maps">
           <div class="form-text">Usado para o botão de "Como chegar" no app.</div>
         </div>
         <div>
           <label class="form-label">Link do Google Meu Negócio (Avaliações)</label>
-          <input name="google_my_business_url" class="form-control" placeholder="https://g.page/r/..." value="<?= e($shop['google_my_business_url'] ?? '') ?>">
+          <input name="google_my_business_url" class="form-control" placeholder="https://g.page/r/..." value="<?= e($shop['google_my_business_url'] ?? '') ?>" aria-label="Link do Google Meu Negócio">
           <div class="form-text">Se preenchido, clientes que derem 5 estrelas serão redirecionados para avaliar publicamente.</div>
         </div>
         <p class="small text-secondary mb-0">Esses links aparecem como ícones no topo do app do cliente.</p>
@@ -147,15 +149,15 @@ admin_layout_start('Configurações', 'dono', 'config');
         <div class="row g-2">
           <div class="col-md-4">
             <label class="form-label">Abre</label>
-            <input type="time" name="open_time" class="form-control" value="<?= e(normalize_time($shop['open_time'] ?? '08:00')) ?>" required>
+            <input type="time" name="open_time" class="form-control" value="<?= e(normalize_time($shop['open_time'] ?? '08:00')) ?>" required aria-label="Horário de abertura">
           </div>
           <div class="col-md-4">
             <label class="form-label">Fecha</label>
-            <input type="time" name="close_time" class="form-control" value="<?= e(normalize_time($shop['close_time'] ?? '20:00')) ?>" required>
+            <input type="time" name="close_time" class="form-control" value="<?= e(normalize_time($shop['close_time'] ?? '20:00')) ?>" required aria-label="Horário de fechamento">
           </div>
           <div class="col-md-4">
             <label class="form-label">Intervalo de agendamento</label>
-            <select name="slot_minutes" class="form-select">
+            <select name="slot_minutes" class="form-select" aria-label="Intervalo de agendamento">
               <?php foreach ([60 => '1 hora', 30 => '30 minutos', 45 => '45 minutos', 90 => '1h30'] as $min => $label): ?>
                 <option value="<?= $min ?>" <?= (int)($shop['slot_minutes'] ?? 60) === $min ? 'selected' : '' ?>><?= e($label) ?></option>
               <?php endforeach; ?>
@@ -172,11 +174,11 @@ admin_layout_start('Configurações', 'dono', 'config');
         <div class="row g-2">
           <div class="col-md-6">
             <label class="form-label">Início do almoço</label>
-            <input type="time" name="lunch_start" class="form-control" value="<?= e(normalize_time($shop['lunch_start'] ?? '12:00')) ?>">
+            <input type="time" name="lunch_start" class="form-control" value="<?= e(normalize_time($shop['lunch_start'] ?? '12:00')) ?>" aria-label="Início do almoço">
           </div>
           <div class="col-md-6">
             <label class="form-label">Fim do almoço</label>
-            <input type="time" name="lunch_end" class="form-control" value="<?= e(normalize_time($shop['lunch_end'] ?? '13:00')) ?>">
+            <input type="time" name="lunch_end" class="form-control" value="<?= e(normalize_time($shop['lunch_end'] ?? '13:00')) ?>" aria-label="Fim do almoço">
           </div>
         </div>
 
@@ -184,7 +186,7 @@ admin_layout_start('Configurações', 'dono', 'config');
         <h2 class="h6 mb-0">Dias bloqueados (Feriados / Folgas)</h2>
         <p class="small text-secondary mb-0">Adicione datas em que a barbearia estará fechada.</p>
         <div class="d-flex gap-2 mt-2">
-            <input type="text" id="blocked-date-input" class="form-control" placeholder="DD/MM/AAAA">
+            <input type="text" id="blocked-date-input" class="form-control" placeholder="DD/MM/AAAA" aria-label="Data a bloquear">
             <button type="button" class="btn btn-outline-secondary" id="add-blocked-date">Adicionar</button>
         </div>
         <ul id="blocked-dates-list" class="list-group mt-2"></ul>
@@ -195,11 +197,11 @@ admin_layout_start('Configurações', 'dono', 'config');
         <p class="small text-secondary mb-0">Cartões tokenizados e cobrança de planos no app do cliente. Chaves em <a href="https://www.mercadopago.com.br/developers/panel/app" target="_blank" rel="noopener">developers.mercadopago.com</a>.</p>
         <div>
           <label class="form-label">Public Key</label>
-          <input name="mp_public_key" class="form-control" autocomplete="off" value="<?= e($shop['mp_public_key'] ?? '') ?>" placeholder="APP_USR-...">
+          <input name="mp_public_key" class="form-control" autocomplete="off" value="<?= e($shop['mp_public_key'] ?? '') ?>" placeholder="APP_USR-..." aria-label="Mercado Pago Public Key">
         </div>
         <div>
           <label class="form-label">Access Token</label>
-          <input name="mp_access_token" class="form-control" autocomplete="off" value="<?= e($shop['mp_access_token'] ?? '') ?>" placeholder="APP_USR-...">
+          <input name="mp_access_token" class="form-control" autocomplete="off" value="<?= e($shop['mp_access_token'] ?? '') ?>" placeholder="APP_USR-..." aria-label="Mercado Pago Access Token">
         </div>
 
         <hr class="border-secondary opacity-25">
@@ -207,15 +209,15 @@ admin_layout_start('Configurações', 'dono', 'config');
         <p class="small text-secondary mb-0">Conecta o WhatsApp real da barbearia (escaneando um QR Code) pra disparar mensagens em Marketing — texto livre, sem precisar de template aprovado pela Meta.</p>
         <div>
           <label class="form-label">URL da Evolution API</label>
-          <input name="evo_api_url" class="form-control" autocomplete="off" value="<?= e($shop['evo_api_url'] ?? '') ?>" placeholder="https://sua-evolution.exemplo.com">
+          <input name="evo_api_url" class="form-control" autocomplete="off" value="<?= e($shop['evo_api_url'] ?? '') ?>" placeholder="https://sua-evolution.exemplo.com" aria-label="URL da Evolution API">
         </div>
         <div>
           <label class="form-label">API Key (global)</label>
-          <input name="evo_api_key" class="form-control" autocomplete="off" value="<?= e($shop['evo_api_key'] ?? '') ?>" placeholder="Chave da sua Evolution API">
+          <input name="evo_api_key" class="form-control" autocomplete="off" value="<?= e($shop['evo_api_key'] ?? '') ?>" placeholder="Chave da sua Evolution API" aria-label="Chave da Evolution API">
         </div>
         <div>
           <label class="form-label">Nome da instância</label>
-          <input name="evo_instance" class="form-control" autocomplete="off" value="<?= e($shop['evo_instance'] ?? '') ?>" placeholder="<?= e(function_exists('evo_default_instance') ? evo_default_instance() : 'loja-' . shop_slug()) ?>">
+          <input name="evo_instance" class="form-control" autocomplete="off" value="<?= e($shop['evo_instance'] ?? '') ?>" placeholder="<?= e(function_exists('evo_default_instance') ? evo_default_instance() : 'loja-' . shop_slug()) ?>" aria-label="Nome da instância Evolution API">
           <div class="form-text">Deixe em branco para usar o padrão acima — só mude se já tiver uma instância criada com outro nome.</div>
         </div>
         <p class="small <?= evo_configured() ? 'text-success' : 'text-secondary' ?> mb-0">

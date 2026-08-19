@@ -14,7 +14,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim($_POST['name'] ?? '');
         $phone = preg_replace('/\D+/', '', (string)($_POST['phone'] ?? ''));
         $birth = trim($_POST['birth_date'] ?? '');
-        $serviceId = (int)($_POST['service_id'] ?? 0);
+        $serviceIdsInput = $_POST['service_ids'] ?? [];
+        $serviceIds = is_array($serviceIdsInput)
+            ? array_values(array_unique(array_filter(array_map('intval', $serviceIdsInput))))
+            : [];
+        $pickedServices = services_by_ids($serviceIds);
+        $serviceIds = array_values(array_map(static fn($service) => (int)$service['id'], $pickedServices));
+        $serviceId = (int)($serviceIds[0] ?? 0);
         $date = trim($_POST['date'] ?? $today);
         $time = trim($_POST['time'] ?? '');
         $wantBook = !empty($_POST['also_book']);
@@ -25,13 +31,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(url('barbeiro/clientes.php'));
         }
 
-        if ($wantBook && ($serviceId < 1 || $time === '')) {
-            flash('danger', 'Para agendar, escolha o serviço e o horário.');
+        if ($wantBook && (!$pickedServices || $time === '')) {
+            flash('danger', 'Para agendar, selecione ao menos um serviço e o horário.');
             redirect(url('barbeiro/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
         
-        if ($wantNow && $serviceId < 1) {
-            flash('danger', 'Para registrar o corte, escolha o serviço.');
+        if ($wantNow && !$pickedServices) {
+            flash('danger', 'Para iniciar o atendimento, selecione ao menos um serviço.');
             redirect(url('barbeiro/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
 
@@ -52,7 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             : 'Cliente cadastrado. Senha inicial = telefone.';
 
         if ($wantBook || $wantNow) {
-            $svc = find_service($serviceId);
+            $servicesTotal = array_sum(array_map(static fn($service) => (float)($service['price'] ?? 0), $pickedServices));
+            $serviceNames = implode(' + ', array_map(static fn($service) => (string)$service['name'], $pickedServices));
             
             if ($wantNow) {
                 $nowTime = date('H:i');
@@ -62,23 +69,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'client_phone' => $client['phone'],
                     'barber_id' => $barberId,
                     'service_id' => $serviceId,
-                    'service_ids' => [$serviceId],
+                    'service_ids' => $serviceIds,
                     'date' => $today,
                     'time' => $nowTime,
                     'status' => 'em_andamento',
                     'notes' => 'Walk-in',
-                    'price' => (float)($svc['price'] ?? 0),
+                    'price' => $servicesTotal,
                     'products' => [],
                 ]);
-                flash('success', $msg . ' Atendimento iniciado e marcado como Em andamento.');
+                flash('success', $msg . ' Atendimento iniciado e marcado como Em andamento. Total: ' . money($servicesTotal) . '.');
                 redirect(url('barbeiro/?date=' . urlencode($today)));
             } else {
-                $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
+                $booked = book_services_for_client((int)$client['id'], $barberId, $serviceIds, $date, $time);
                 if (is_string($booked)) {
                     flash('warning', $msg . ' Agendamento não criado: ' . $booked);
                     redirect(url('barbeiro/clientes.php'));
                 }
-                $msg .= ' Agendado: ' . ($svc['name'] ?? 'serviço') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '.';
+                $msg .= ' Agendado: ' . ($serviceNames ?: 'serviço') . ' em ' . date('d/m/Y', strtotime($date)) . ' às ' . normalize_time($time) . '. Total: ' . money($servicesTotal) . '.';
             }
         }
         flash('success', $msg);
@@ -122,7 +129,7 @@ if (isset($_GET['edit'])) {
     }
 }
 
-$formDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['date'] ?? '')) ? (string)$_GET['date'] : $today;
+$formDate = is_valid_iso_date((string)($_GET['date'] ?? '')) ? (string)$_GET['date'] : $today;
 $formService = (int)($_GET['service_id'] ?? ($services[0]['id'] ?? 0));
 $formDuration = 60;
 foreach ($services as $s) {
@@ -205,17 +212,37 @@ barber_shell_start('Clientes', 'clientes');
       <p class="bb-tab-hint" id="tabHint">Salva só os dados do cliente.</p>
 
       <div id="bookFields" class="bb-book-hidden">
-        <label>
-          <span>Tipo de serviço</span>
-          <select name="service_id" id="bookService">
-            <option value="">Selecione…</option>
+        <fieldset class="bb-service-fieldset">
+          <legend>Serviços</legend>
+          <p class="bb-live-hint">Marque tudo que será realizado.</p>
+          <div class="bb-service-picker">
             <?php foreach ($services as $s): ?>
-              <option value="<?= (int)$s['id'] ?>" <?= $formService === (int)$s['id'] ? 'selected' : '' ?>>
-                <?= e($s['name']) ?> · <?= e(money((float)$s['price'])) ?>
-              </option>
+              <label class="bb-service-option">
+                <input
+                  type="checkbox"
+                  name="service_ids[]"
+                  value="<?= (int)$s['id'] ?>"
+                  data-price="<?= e((string)$s['price']) ?>"
+                  data-duration="<?= max(15, (int)($s['duration_min'] ?? 30)) ?>"
+                  class="bb-service-input"
+                  <?= $formService === (int)$s['id'] ? 'checked' : '' ?>
+                >
+                <span class="bb-service-copy">
+                  <strong><?= e($s['name']) ?></strong>
+                  <small><?= max(15, (int)($s['duration_min'] ?? 30)) ?> min</small>
+                </span>
+                <span class="bb-service-price"><?= e(money((float)$s['price'])) ?></span>
+              </label>
             <?php endforeach; ?>
-          </select>
-        </label>
+            <?php if (!$services): ?>
+              <p class="bb-live-hint">Nenhum serviço ativo. Solicite o cadastro ao responsável.</p>
+            <?php endif; ?>
+          </div>
+          <div class="bb-service-summary" aria-live="polite">
+            <span id="serviceSelectionMeta">Nenhum serviço selecionado</span>
+            <strong id="serviceSelectionTotal">Total: R$ 0,00</strong>
+          </div>
+        </fieldset>
         <label>
           <span>Barbeiro</span>
           <input value="<?= e($user['name'] ?? 'Você') ?>" disabled>
@@ -304,13 +331,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const alsoBookHidden = document.getElementById('alsoBookHidden');
   const cutNowHidden = document.getElementById('cutNowHidden');
   const book = document.getElementById('bookFields');
-  const svc = document.getElementById('bookService');
+  const serviceInputs = Array.from(document.querySelectorAll('.bb-service-input'));
+  const serviceMeta = document.getElementById('serviceSelectionMeta');
+  const serviceTotal = document.getElementById('serviceSelectionTotal');
   const date = document.getElementById('bookDate');
   const time = document.getElementById('bookTime');
   const tabHint = document.getElementById('tabHint');
   const submitBtn = document.getElementById('submitBtn');
   const slotsUrl = <?= json_encode(url('api/slots.php')) ?>;
   const barberId = <?= (int)$barberId ?>;
+  const moneyFormat = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
   let activeTab = 'save';
 
   const hints = {
@@ -347,31 +377,48 @@ document.addEventListener('DOMContentLoaded', () => {
         time.closest('label').style.display = isNow ? 'none' : 'block';
     }
 
-    if (svc) {
-        if (on) svc.setAttribute('required', 'required');
-        else svc.removeAttribute('required');
-    }
-
     [date, time].forEach((el) => {
       if (!el) return;
       if (isBook) el.setAttribute('required', 'required');
       else el.removeAttribute('required');
     });
 
+    updateServiceSummary();
     if (isBook) loadSlots();
+  }
+
+  function selectedServices() {
+    return serviceInputs.filter((input) => input.checked);
+  }
+
+  function updateServiceSummary() {
+    const selected = selectedServices();
+    const total = selected.reduce((sum, input) => sum + Number(input.dataset.price || 0), 0);
+    const duration = selected.reduce((sum, input) => sum + Number(input.dataset.duration || 0), 0);
+    const count = selected.length;
+    if (serviceMeta) {
+      serviceMeta.textContent = count
+        ? `${count} serviço${count === 1 ? '' : 's'} · ${duration} min`
+        : 'Nenhum serviço selecionado';
+    }
+    if (serviceTotal) serviceTotal.textContent = `Total: ${moneyFormat.format(total)}`;
+    if (serviceInputs[0]) {
+      serviceInputs[0].setCustomValidity(activeTab !== 'save' && count === 0 ? 'Selecione ao menos um serviço.' : '');
+    }
   }
 
   async function loadSlots() {
     if (!time) return;
     const d = date?.value || '';
-    const sid = svc?.value || '';
-    if (!d) {
+    const selected = selectedServices();
+    if (!d || !selected.length) {
       time.innerHTML = '<option value=\"\">Selecione…</option>';
       return;
     }
     time.innerHTML = '<option value=\"\">Carregando…</option>';
     try {
-      const q = new URLSearchParams({ barber_id: String(barberId), date: d, service_id: sid });
+      const q = new URLSearchParams({ barber_id: String(barberId), date: d });
+      selected.forEach((input) => q.append('service_ids[]', input.value));
       const res = await fetch(slotsUrl + '?' + q.toString(), { credentials: 'same-origin', cache: 'no-store' });
       const data = await res.json();
       const slots = Array.isArray(data.slots) ? data.slots : [];
@@ -388,7 +435,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   tabs.forEach((btn) => btn.addEventListener('click', () => setTab(btn.dataset.tab || 'save')));
-  [svc, date].forEach((el) => el && el.addEventListener('change', () => {
+  serviceInputs.forEach((input) => input.addEventListener('change', () => {
+      updateServiceSummary();
+      if (activeTab === 'book') loadSlots();
+  }));
+  [date].forEach((el) => el && el.addEventListener('change', () => {
       if (activeTab === 'book') loadSlots();
   }));
   setTab('save');

@@ -3,9 +3,14 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/layout.php';
 
 $booking = $_SESSION['booking'] ?? [];
-if (empty($booking['services']) || empty($booking['barber_id'])) {
+$bookingServiceIds = isset($booking['services']) && is_array($booking['services'])
+    ? array_values(array_unique(array_filter(array_map('intval', $booking['services']))))
+    : [];
+if (!$bookingServiceIds || empty($booking['barber_id'])) {
     redirect(url('cliente/'));
 }
+$booking['services'] = $bookingServiceIds;
+$_SESSION['booking']['services'] = $bookingServiceIds;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['date'], $_POST['time']) && !isset($_POST['confirm'])) {
     $_SESSION['booking']['date'] = $_POST['date'];
@@ -19,7 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['date'], $_POST['time'
     $diasAteDomingo = $hojeW === 0 ? 0 : 7 - $hojeW;
     $ultimoDiaSemana = date('Y-m-d', strtotime("+$diasAteDomingo days"));
     
-    if ($_SESSION['booking']['date'] > $ultimoDiaSemana) {
+    $selectedDate = (string)$_SESSION['booking']['date'];
+    if (!is_valid_iso_date($selectedDate) || $selectedDate < date('Y-m-d') || $selectedDate > $ultimoDiaSemana) {
         unset($_SESSION['booking']['date']);
         flash('danger', 'A data selecionada não é permitida.');
         redirect(url('cliente/profissional.php'));
@@ -36,6 +42,13 @@ if (empty($booking['date']) || empty($booking['time'])) {
 }
 
 $services = services_by_ids($booking['services']);
+if (!$services) {
+    unset($_SESSION['booking']);
+    flash('warning', 'Os serviços selecionados não estão mais disponíveis.');
+    redirect(url('cliente/'));
+}
+$booking['services'] = array_values(array_map(static fn($service) => (int)$service['id'], $services));
+$_SESSION['booking']['services'] = $booking['services'];
 $planServiceId = (int)($booking['plan_service_id'] ?? 0);
 $total = 0.0;
 foreach ($services as $s) {
@@ -98,45 +111,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm'])) {
     }
 
     if ($error === null && !empty($clientId)) {
-        $cursor = strtotime($booking['date'] . ' ' . $booking['time']);
-        foreach ($services as $svc) {
-            $price = (float)$svc['price'];
-            if (!empty($booking['from_plan']) && (int)$svc['id'] === $planServiceId) {
-                $price = 0;
-            }
-            save_appointment([
-                'client_id' => $clientId,
-                'client_name' => $name,
-                'client_phone' => $phone,
-                'barber_id' => (int)$booking['barber_id'],
-                'service_id' => (int)$svc['id'],
-                'date' => $booking['date'],
-                'time' => date('H:i', $cursor),
-                'status' => 'agendado',
-                'notes' => !empty($booking['from_plan']) ? 'Plano #' . (int)($booking['plan_id'] ?? 0) : null,
-                'price' => $price,
-            ]);
-            $cursor += ((int)$svc['duration_min'] * 60);
-        }
+        $appointment = book_services_for_client(
+            (int)$clientId,
+            (int)$booking['barber_id'],
+            $booking['services'],
+            (string)$booking['date'],
+            (string)$booking['time']
+        );
 
-        if (!empty($booking['from_plan']) && !empty($booking['subscription_id'])) {
-            $subs = store_read('subscriptions');
-            foreach ($subs as $i => $row) {
-                if ((int)$row['id'] === (int)$booking['subscription_id']) {
-                    $subs[$i]['usage_count'] = (int)($row['usage_count'] ?? 0) + 1;
-                    break;
+        if (is_string($appointment)) {
+            $error = $appointment;
+        } else {
+            if (!empty($booking['from_plan'])) {
+                $appointment['notes'] = 'Plano #' . (int)($booking['plan_id'] ?? 0);
+                $appointment['price'] = $total;
+                save_appointment($appointment);
+            }
+
+            if (!empty($booking['from_plan']) && !empty($booking['subscription_id'])) {
+                $subs = store_read('subscriptions');
+                foreach ($subs as $i => $row) {
+                    if ((int)$row['id'] === (int)$booking['subscription_id']) {
+                        $subs[$i]['usage_count'] = (int)($row['usage_count'] ?? 0) + 1;
+                        break;
+                    }
                 }
+                store_write('subscriptions', $subs);
             }
-            store_write('subscriptions', $subs);
-        }
 
-        $clientUser = find_user_by_id($clientId);
-        if ($clientUser) {
-            login_client($clientUser);
+            $clientUser = find_user_by_id((int)$clientId);
+            if ($clientUser) {
+                login_client($clientUser);
+            }
+            unset($_SESSION['booking'], $_SESSION['plan_booking']);
+            flash('success', 'Agendamento confirmado!');
+            redirect(url('cliente/sucesso.php'));
         }
-        unset($_SESSION['booking'], $_SESSION['plan_booking']);
-        flash('success', 'Agendamento confirmado!');
-        redirect(url('cliente/sucesso.php'));
     }
 }
 

@@ -102,7 +102,7 @@ admin_layout_start('Comissões', 'dono', 'comissoes');
           <input type="hidden" name="action" value="save_rule">
           <div>
             <label class="form-label">Percentual sobre o faturamento (%)</label>
-            <input type="number" name="commission_percent" class="form-control" min="0" max="100" step="0.1" required value="<?= e((string)$percent) ?>">
+          <input type="number" name="commission_percent" class="form-control" min="0" max="100" step="0.1" required value="<?= e((string)$percent) ?>" aria-label="Percentual de comissão">
             <div class="form-text">Ex.: 40 = 40% do valor gerado por cada barbeiro.</div>
           </div>
           <div class="d-flex gap-2 justify-content-end">

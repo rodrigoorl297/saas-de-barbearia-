@@ -4,7 +4,8 @@ require_once __DIR__ . '/../includes/layout.php';
 
 $shop = settings();
 $services = active_services();
-$selected = $_SESSION['booking']['services'] ?? [];
+$selectedInput = $_SESSION['booking']['services'] ?? [];
+$selected = is_array($selectedInput) ? array_map('intval', $selectedInput) : [];
 
 render_head('Agendar', true);
 client_shell_start('agendar');
@@ -33,7 +34,7 @@ $shopName = shop_brand_name();
     <div class="card-servico-container">
       <?php foreach ($services as $svc): ?>
         <?php
-          $checked = in_array((int)$svc['id'], array_map('intval', $selected), true);
+          $checked = in_array((int)$svc['id'], $selected, true);
           $img = !empty($svc['image_url']) ? media_url($svc['image_url']) : '';
         ?>
         <label class="card-servico <?= $checked ? 'is-selected' : '' ?>"

@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-render_head('Entrar');
+render_head('Entrar', false, null, true);
 ?>
 <div class="login-stage">
   <div class="login-stage-glow" aria-hidden="true"></div>
@@ -66,4 +66,4 @@ render_head('Entrar');
     </footer>
   </div>
 </div>
-<?php render_scripts(false); ?>
+<?php render_scripts(false, false, true); ?>

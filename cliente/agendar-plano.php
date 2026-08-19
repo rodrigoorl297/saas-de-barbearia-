@@ -41,7 +41,8 @@ if (!$plan) {
 function plan_included_service(array $plan): ?array
 {
     if (!empty($plan['service_id'])) {
-        return find_service((int)$plan['service_id']);
+        $service = find_service((int)$plan['service_id']);
+        return $service && !empty($service['active']) ? $service : null;
     }
     $label = strtolower((string)($plan['benefit_label'] ?? 'corte'));
     $services = active_services();
@@ -65,10 +66,14 @@ if (!$included) {
     redirect(url('cliente/conta.php'));
 }
 
-$extraIds = array_values(array_filter(array_map('intval', $_SESSION['plan_booking']['extras'] ?? [])));
+$sessionExtras = $_SESSION['plan_booking']['extras'] ?? [];
+$extraIds = is_array($sessionExtras)
+    ? array_values(array_unique(array_filter(array_map('intval', $sessionExtras))))
+    : [];
 if (isset($_GET['add_extra'])) {
     $eid = (int)$_GET['add_extra'];
-    if ($eid > 0 && $eid !== (int)$included['id'] && !in_array($eid, $extraIds, true)) {
+    $extraService = $eid > 0 ? find_service($eid) : null;
+    if ($extraService && !empty($extraService['active']) && $eid !== (int)$included['id'] && !in_array($eid, $extraIds, true)) {
         $extraIds[] = $eid;
         $_SESSION['plan_booking']['extras'] = $extraIds;
     }
@@ -82,6 +87,8 @@ if (isset($_GET['remove_extra'])) {
 }
 
 $extrasSelected = services_by_ids($extraIds);
+$extraIds = array_values(array_map(static fn($service) => (int)$service['id'], $extrasSelected));
+$_SESSION['plan_booking']['extras'] = $extraIds;
 $allServiceIds = array_merge([(int)$included['id']], $extraIds);
 $duration = max(60, array_sum(array_map(fn($s) => (int)$s['duration_min'], array_merge([$included], $extrasSelected))));
 

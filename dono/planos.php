@@ -11,6 +11,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save') {
         $id = (int)($_POST['id'] ?? 0);
         $cur = $id > 0 ? find_plan($id) : null;
+        if ($id > 0 && !$cur) {
+            flash('danger', 'Plano não encontrado.');
+            redirect(url('dono/planos.php'));
+        }
         $images = $cur['images'] ?? ['', '', ''];
         if (!is_array($images)) {
             $images = ['', '', ''];
@@ -36,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $payload = [
             'name' => trim($_POST['name'] ?? ''),
-            'price' => (float)($_POST['price'] ?? 0),
+            'price' => max(0, (float)($_POST['price'] ?? 0)),
             'interval' => trim($_POST['interval'] ?? 'Mês') ?: 'Mês',
             'headline' => trim($_POST['headline'] ?? ''),
             'description' => trim($_POST['description'] ?? ''),
@@ -176,39 +180,39 @@ admin_layout_start('Planos e pacotes', 'dono', 'planos');
 
           <div>
             <label class="form-label">Nome do plano</label>
-            <input name="name" class="form-control" required placeholder="Ex: Clube Suprema" value="<?= e($edit['name'] ?? '') ?>">
+            <input name="name" class="form-control" required placeholder="Ex: Clube Suprema" value="<?= e($edit['name'] ?? '') ?>" aria-label="Nome do plano">
           </div>
           <div class="row g-2">
             <div class="col-6">
               <label class="form-label">Preço (R$)</label>
-              <input type="number" step="0.01" name="price" class="form-control" required value="<?= e((string)($edit['price'] ?? '')) ?>">
+              <input type="number" step="0.01" min="0" name="price" class="form-control" required value="<?= e((string)($edit['price'] ?? '')) ?>" aria-label="Preço do plano">
             </div>
             <div class="col-6">
               <label class="form-label">Período</label>
-              <input name="interval" class="form-control" value="<?= e($edit['interval'] ?? 'Mês') ?>" placeholder="Mês">
+              <input name="interval" class="form-control" value="<?= e($edit['interval'] ?? 'Mês') ?>" placeholder="Mês" aria-label="Intervalo de cobrança">
             </div>
           </div>
           <div>
             <label class="form-label">Título curto</label>
-            <input name="headline" class="form-control" placeholder="Ex: Pai e filho o mês todo..." value="<?= e($edit['headline'] ?? '') ?>">
+            <input name="headline" class="form-control" placeholder="Ex: Pai e filho o mês todo..." value="<?= e($edit['headline'] ?? '') ?>" aria-label="Chamada do plano">
           </div>
           <div>
             <label class="form-label">Descrição</label>
-            <textarea name="description" class="form-control" rows="3"><?= e($edit['description'] ?? '') ?></textarea>
+            <textarea name="description" class="form-control" rows="3" aria-label="Descrição do plano"><?= e($edit['description'] ?? '') ?></textarea>
           </div>
           <div class="row g-2">
             <div class="col-7">
               <label class="form-label">Benefício</label>
-              <input name="benefit_label" class="form-control" value="<?= e($edit['benefit_label'] ?? 'Corte plano') ?>">
+              <input name="benefit_label" class="form-control" value="<?= e($edit['benefit_label'] ?? 'Corte plano') ?>" aria-label="Benefício principal do plano">
             </div>
             <div class="col-5">
               <label class="form-label">Limite uso</label>
-              <input name="usage_limit" class="form-control" placeholder="vazio = ilimitado" value="<?= e($edit && array_key_exists('usage_limit', $edit) && $edit['usage_limit'] !== null ? (string)$edit['usage_limit'] : '') ?>">
+              <input name="usage_limit" class="form-control" placeholder="vazio = ilimitado" value="<?= e($edit && array_key_exists('usage_limit', $edit) && $edit['usage_limit'] !== null ? (string)$edit['usage_limit'] : '') ?>" aria-label="Limite de usos do plano">
             </div>
           </div>
           <div>
             <label class="form-label">Ordem</label>
-            <input type="number" name="sort_order" class="form-control" value="<?= e((string)($edit['sort_order'] ?? 99)) ?>">
+            <input type="number" name="sort_order" class="form-control" value="<?= e((string)($edit['sort_order'] ?? 99)) ?>" aria-label="Ordem de exibição">
           </div>
           <div>
             <label class="form-label mb-2">Fotos (até 3)</label>
@@ -221,7 +225,7 @@ admin_layout_start('Planos e pacotes', 'dono', 'planos');
                     <label class="form-check-label small" for="clr<?= $i ?>">Remover foto <?= $i + 1 ?></label>
                   </div>
                 <?php endif; ?>
-                <input type="file" name="image_<?= $i ?>" class="form-control form-control-sm js-image-input" accept="image/*">
+                <input type="file" name="image_<?= $i ?>" class="form-control form-control-sm js-image-input" accept="image/*" aria-label="Imagem <?= $i + 1 ?> do plano">
               </div>
             <?php endfor; ?>
           </div>

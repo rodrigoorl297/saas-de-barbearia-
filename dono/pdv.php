@@ -13,20 +13,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $priceMap = [];
         $nameMap = [];
+        $stockQtyMap = [];
         foreach ($stock as $s) {
             $priceMap[(int)$s['id']] = (float)$s['price'];
             $nameMap[(int)$s['id']] = $s['name'];
+            $stockQtyMap[(int)$s['id']] = (int)($s['qty'] ?? 0);
         }
 
+        $requested = [];
         foreach ($cart as $item) {
             $id = (int)($item['id'] ?? 0);
             $qty = (int)($item['qty'] ?? 0);
-            if ($id > 0 && $qty > 0 && isset($priceMap[$id])) {
-                $subtotal = $priceMap[$id] * $qty;
-                $total += $subtotal;
-                $productNames[] = $qty . 'x ' . $nameMap[$id];
-                
-                stock_consume($id, $qty, 'out_venda', (int)$user['id'], 'Venda Frente de Caixa (PDV)', false);
+            if ($id > 0 && $qty > 0 && isset($priceMap[$id]) && $priceMap[$id] > 0) {
+                $requested[$id] = ($requested[$id] ?? 0) + $qty;
+            }
+        }
+
+        foreach ($requested as $id => $qty) {
+            if ($qty > ($stockQtyMap[$id] ?? 0)) {
+                flash('danger', 'Estoque insuficiente para ' . $nameMap[$id] . ' (' . ($stockQtyMap[$id] ?? 0) . ' disponível).');
+                redirect(url('dono/pdv.php'));
+            }
+        }
+
+        foreach ($requested as $id => $qty) {
+            $total += $priceMap[$id] * $qty;
+            $productNames[] = $qty . 'x ' . $nameMap[$id];
+            $stockError = stock_consume($id, $qty, 'out_venda', (int)$user['id'], 'Venda Frente de Caixa (PDV)', false);
+            if ($stockError) {
+                flash('danger', $stockError);
+                redirect(url('dono/pdv.php'));
             }
         }
         

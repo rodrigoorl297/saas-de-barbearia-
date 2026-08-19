@@ -9,6 +9,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save') {
         $id = (int)($_POST['id'] ?? 0);
         $cur = $id > 0 ? find_service($id) : null;
+        if ($id > 0 && !$cur) {
+            flash('danger', 'Serviço não encontrado.');
+            redirect(url('dono/servicos.php'));
+        }
         $image = $cur['image_url'] ?? '';
         $uploaded = upload_image($_FILES['image'] ?? [], 'servicos');
         if ($uploaded) {
@@ -18,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $payload = [
             'name' => trim($_POST['name'] ?? ''),
             'description' => trim($_POST['description'] ?? ''),
-            'price' => (float)($_POST['price'] ?? 0),
+            'price' => max(0, (float)($_POST['price'] ?? 0)),
             'duration_min' => max(15, (int)($_POST['duration_min'] ?? 60)),
             'active' => isset($_POST['active']) ? 1 : 0,
             'image_url' => $image,
@@ -134,24 +138,24 @@ admin_layout_start('Serviços', 'dono', 'servicos');
           <?php endif; ?>
           <div class="js-image-upload">
             <label class="form-label">Foto do serviço</label>
-            <input type="file" name="image" class="form-control" accept="image/*">
+            <input type="file" name="image" class="form-control" accept="image/*" aria-label="Imagem do serviço">
           </div>
           <div>
             <label class="form-label">Nome</label>
-            <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>">
+            <input name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>" aria-label="Nome do serviço">
           </div>
           <div>
             <label class="form-label">Descrição</label>
-            <textarea name="description" class="form-control" rows="3" placeholder="Ex: Degradê, low fade, acabamento na navalha..."><?= e($edit['description'] ?? '') ?></textarea>
+            <textarea name="description" class="form-control" rows="3" placeholder="Ex: Degradê, low fade, acabamento na navalha..." aria-label="Descrição do serviço"><?= e($edit['description'] ?? '') ?></textarea>
           </div>
           <div class="row g-2">
             <div class="col-6">
               <label class="form-label">Preço (R$)</label>
-              <input type="number" step="0.01" name="price" class="form-control" required value="<?= e((string)($edit['price'] ?? '')) ?>">
+              <input type="number" step="0.01" min="0" name="price" class="form-control" required value="<?= e((string)($edit['price'] ?? '')) ?>" aria-label="Preço do serviço">
             </div>
             <div class="col-6">
               <label class="form-label">Tempo (min)</label>
-              <input type="number" name="duration_min" class="form-control" value="<?= e((string)($edit['duration_min'] ?? 60)) ?>" min="15" step="15">
+              <input type="number" name="duration_min" class="form-control" value="<?= e((string)($edit['duration_min'] ?? 60)) ?>" min="15" step="15" aria-label="Duração do serviço em minutos">
             </div>
           </div>
           <div class="form-check">

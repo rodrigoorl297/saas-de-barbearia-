@@ -4,7 +4,7 @@ require_once __DIR__ . '/../includes/layout.php';
 
 $user = require_role(['dono']);
 $date = (string)($_POST['date'] ?? ($_GET['date'] ?? date('Y-m-d')));
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+if (!is_valid_iso_date($date)) {
     $date = date('Y-m-d');
 }
 $view = ($_POST['view'] ?? ($_GET['view'] ?? 'agenda')) === 'historico' ? 'historico' : 'agenda';
@@ -74,7 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'finalize' || $action === 'update_services') {
-            $ids = array_values(array_unique(array_filter(array_map('intval', $_POST['service_ids'] ?? []))));
+            $serviceIdsInput = $_POST['service_ids'] ?? [];
+            $ids = is_array($serviceIdsInput)
+                ? array_values(array_unique(array_filter(array_map('intval', $serviceIdsInput))))
+                : [];
             if (!$ids && !empty($a['service_id'])) {
                 $ids = [(int)$a['service_id']];
             }
@@ -83,6 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('danger', 'Selecione ao menos um serviço.');
                 redirect($agendaUrl($date, $view));
             }
+            $ids = array_values(array_map(static fn($service) => (int)$service['id'], $picked));
             $price = array_sum(array_map(fn($s) => (float)$s['price'], $picked));
             $a['service_ids'] = $ids;
             $a['service_id'] = $ids[0];
@@ -101,10 +105,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('success', 'Serviços atualizados. Total agora: ' . money($price));
             }
         } elseif ($action === 'status') {
-            $st = $_POST['status'] ?? '';
+            $st = (string)($_POST['status'] ?? '');
             // Concluído só pelo modal de finalização (permite extras)
             if ($st === 'concluido') {
                 flash('warning', 'Para concluir, use + Serviços e finalizar.');
+                redirect($agendaUrl($date, $view));
+            }
+            if (!in_array($st, ['agendado', 'confirmado', 'em_andamento', 'cancelado', 'faltou'], true)) {
+                flash('danger', 'Status inválido.');
                 redirect($agendaUrl($date, $view));
             }
             $a['status'] = $st;
@@ -112,10 +120,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Status atualizado.');
         } elseif ($action === 'barber') {
             $bid = (int)($_POST['barber_id'] ?? 0);
-            if ($bid > 0) {
+            $selectedBarber = find_user_by_id($bid);
+            if ($selectedBarber && ($selectedBarber['role'] ?? '') === 'barbeiro' && !empty($selectedBarber['active'])) {
                 $a['barber_id'] = $bid;
                 save_appointment($a);
                 flash('success', 'Barbeiro atualizado.');
+            } else {
+                flash('danger', 'Barbeiro inválido.');
             }
         }
         break;
@@ -299,7 +310,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
           <div class="agenda-card" data-status="<?= e($a['status']) ?>">
             <div class="agenda-card-top">
               <span class="agenda-card-time"><?= e($a['time']) ?></span>
-              <span class="agenda-card-status" style="--sc:<?= $sc ?>;"><?= $sl ?></span>
+              <span class="agenda-card-status" style="--sc:<?= e($sc) ?>;"><?= e($sl) ?></span>
             </div>
 
             <div class="agenda-card-client">
@@ -334,7 +345,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
                 <select name="status" class="agenda-select" onchange="agendaOnStatus(this)" data-prev="<?= e($a['status']) ?>">
                   <?php foreach ($statusLabels as $sv => $slv): ?>
                     <?php if ($sv === 'concluido') continue; ?>
-                    <option value="<?= $sv ?>" <?= $a['status'] === $sv ? 'selected' : '' ?>><?= $slv ?></option>
+                    <option value="<?= e($sv) ?>" <?= $a['status'] === $sv ? 'selected' : '' ?>><?= e($slv) ?></option>
                   <?php endforeach; ?>
                 </select>
               </form>
@@ -438,15 +449,15 @@ admin_layout_start('Agenda', 'dono', 'agenda');
           <input type="hidden" name="action" value="walkin">
           <div>
             <label class="form-label">Nome do cliente</label>
-            <input type="text" name="client_name" class="form-control" required autofocus>
+            <input type="text" name="client_name" class="form-control" required autofocus aria-label="Nome do cliente">
           </div>
           <div>
             <label class="form-label">Telefone (com DDD)</label>
-            <input type="tel" name="client_phone" class="form-control" placeholder="(11) 91234-5678" required>
+            <input type="tel" name="client_phone" class="form-control" placeholder="(11) 91234-5678" required aria-label="Telefone do cliente com DDD">
           </div>
           <div>
             <label class="form-label">Barbeiro</label>
-            <select name="barber_id" class="form-select" required>
+            <select name="barber_id" class="form-select" required aria-label="Barbeiro">
               <option value="">Selecione…</option>
               <?php foreach ($barbers as $bx): ?>
                 <option value="<?= (int)$bx['id'] ?>"><?= e($bx['name']) ?></option>
@@ -459,7 +470,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
               <span class="small text-secondary">Agora: <strong id="walkinClock">--:--</strong></span>
             </label>
             <div class="d-flex gap-2">
-              <input type="time" name="time" id="walkinTime" class="form-control" required>
+              <input type="time" name="time" id="walkinTime" class="form-control" required aria-label="Horário do atendimento">
               <button type="button" class="btn btn-ghost" id="walkinUseNow">Usar agora</button>
             </div>
             <div class="form-text">Preenche com o horário atual, mas você pode trocar pra qualquer hora — não precisa bater com a grade de horários.</div>

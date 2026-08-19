@@ -147,16 +147,16 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
         <input type="hidden" name="action" value="save_rules">
         <div class="col-12">
           <label class="form-label small mb-1">Pontos por R$ 1 gasto</label>
-          <input type="number" step="0.1" min="0" name="points_per_real" class="form-control form-control-sm" value="<?= e((string)$pointsPerReal) ?>">
+          <input type="number" step="0.1" min="0" name="points_per_real" class="form-control form-control-sm" value="<?= e((string)$pointsPerReal) ?>" aria-label="Pontos por real">
           <div class="form-text">Concedidos automaticamente quando um agendamento é concluído.</div>
         </div>
         <div class="col-6">
           <label class="form-label small mb-1">Nível Prata a partir de</label>
-          <input type="number" min="1" name="prata_min" class="form-control form-control-sm" value="<?= (int)$thresholds['prata'] ?>">
+          <input type="number" min="1" name="prata_min" class="form-control form-control-sm" value="<?= (int)$thresholds['prata'] ?>" aria-label="Mínimo para nível prata">
         </div>
         <div class="col-6">
           <label class="form-label small mb-1">Nível Ouro a partir de</label>
-          <input type="number" min="1" name="ouro_min" class="form-control form-control-sm" value="<?= (int)$thresholds['ouro'] ?>">
+          <input type="number" min="1" name="ouro_min" class="form-control form-control-sm" value="<?= (int)$thresholds['ouro'] ?>" aria-label="Mínimo para nível ouro">
         </div>
         <div class="col-12 pt-2">
           <button class="btn btn-accent btn-sm" type="submit">Salvar regras</button>
@@ -232,7 +232,7 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
             <form method="post" class="d-flex gap-1 align-items-center">
               <input type="hidden" name="action" value="adjust">
               <input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
-              <input type="number" name="points" class="form-control form-control-sm" style="width:64px" value="10" min="1">
+              <input type="number" name="points" class="form-control form-control-sm" style="width:64px" value="10" min="1" aria-label="Quantidade de pontos para <?= e($m['client_name'] ?? 'cliente') ?>">
               <button class="btn btn-sm btn-outline-success" type="submit" name="op" value="add" title="Adicionar pontos">+</button>
               <button class="btn btn-sm btn-outline-danger" type="submit" name="op" value="sub" title="Remover pontos">&minus;</button>
             </form>
@@ -300,11 +300,11 @@ admin_layout_start('Fidelidade', 'dono', 'fidelidade');
           <input type="hidden" name="reward_id" value="<?= (int)($editReward['id'] ?? 0) ?>">
           <div>
             <label class="form-label">Nome</label>
-            <input name="name" class="form-control" required value="<?= e($editReward['name'] ?? '') ?>" placeholder="Ex: Corte grátis">
+            <input name="name" class="form-control" required value="<?= e($editReward['name'] ?? '') ?>" placeholder="Ex: Corte grátis" aria-label="Nome da recompensa">
           </div>
           <div>
             <label class="form-label">Custo em pontos</label>
-            <input type="number" min="1" name="cost" class="form-control" value="<?= (int)($editReward['cost'] ?? 100) ?>">
+            <input type="number" min="1" name="cost" class="form-control" value="<?= (int)($editReward['cost'] ?? 100) ?>" aria-label="Custo da recompensa em pontos">
           </div>
           <div class="form-check">
             <input type="checkbox" name="active" value="1" class="form-check-input" id="rewardActive" <?= ($editReward['active'] ?? 1) ? 'checked' : '' ?>>

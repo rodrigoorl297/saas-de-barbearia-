@@ -5,7 +5,7 @@ require_once __DIR__ . '/../includes/layout.php';
 $user = require_role(['barbeiro']);
 $today = date('Y-m-d');
 $date = $_GET['date'] ?? ($_POST['date'] ?? $today);
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+if (!is_valid_iso_date($date)) {
     $date = $today;
 }
 $partial = isset($_GET['partial']) && $_GET['partial'] === '1';
@@ -44,6 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stockById[(int)$p['id']] = $p;
             }
 
+            $requestedProducts = [];
             foreach ($qtys as $pid => $qtyRaw) {
                 $pid = (int)$pid;
                 $qty = max(0, (int)$qtyRaw);
@@ -51,9 +52,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     continue;
                 }
                 $p = $stockById[$pid] ?? null;
-                if (!$p || (float)($p['price'] ?? 0) <= 0) {
+                if (!$p
+                    || (isset($p['active']) && empty($p['active']))
+                    || (float)($p['price'] ?? 0) <= 0) {
                     continue;
                 }
+                if ($qty > (int)($p['qty'] ?? 0)) {
+                    flash('danger', 'Estoque insuficiente para ' . (string)($p['name'] ?? 'produto') . ' (' . (int)($p['qty'] ?? 0) . ' disponível).');
+                    redirect(url('barbeiro/?date=' . urlencode($date)));
+                }
+                $requestedProducts[$pid] = $qty;
+            }
+
+            foreach ($requestedProducts as $pid => $qty) {
+                $p = $stockById[$pid];
                 $err = stock_consume($pid, $qty, 'out_venda', (int)$user['id'], 'Atendimento #' . $id, false);
                 if ($err) {
                     flash('danger', $err);

@@ -106,19 +106,29 @@ function money(float|int|string $value): string
 function normalize_time(?string $time, string $fallback = '09:00'): string
 {
     $time = trim((string) $time);
-    if (preg_match('/^\d{2}:\d{2}$/', $time)) {
+    if (preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $time)) {
         return $time;
     }
-    if (preg_match('/^\d{2}:\d{2}:\d{2}$/', $time)) {
+    if (preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/', $time)) {
         return substr($time, 0, 5);
     }
     return $fallback;
 }
 
+function is_valid_iso_date(?string $date): bool
+{
+    $date = trim((string)$date);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return false;
+    }
+    [$year, $month, $day] = array_map('intval', explode('-', $date));
+    return checkdate($month, $day, $year);
+}
+
 function wa_mask_phone(string $phone): string
 {
     $digits = preg_replace('/\D+/', '', $phone) ?? '';
-    if (strlen($digits) <= 4) {
+    if (strlen($digits) <= 6) {
         return str_repeat('*', strlen($digits));
     }
     return substr($digits, 0, 4) . str_repeat('*', strlen($digits) - 6) . substr($digits, -2);
@@ -735,7 +745,7 @@ function upsert_client(array $data): array
     $name = trim((string)($data['name'] ?? ''));
     $phone = preg_replace('/\D+/', '', (string)($data['phone'] ?? ''));
     $birth = trim((string)($data['birth_date'] ?? ''));
-    if ($birth !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $birth)) {
+    if ($birth !== '' && !is_valid_iso_date($birth)) {
         $ts = strtotime($birth);
         $birth = $ts ? date('Y-m-d', $ts) : '';
     }
@@ -782,7 +792,7 @@ function upsert_client(array $data): array
  */
 function client_already_booked_on_date(int $clientId, string $date, string $phone = ''): bool
 {
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+    if (!is_valid_iso_date($date)) {
         return false;
     }
     $phone = preg_replace('/\D+/', '', $phone);
@@ -807,10 +817,10 @@ function client_already_booked_on_date(int $clientId, string $date, string $phon
 }
 
 /**
- * Agenda serviço para um cliente. Retorna o agendamento ou mensagem de erro.
+ * Agenda um ou mais serviços para um cliente. Retorna o agendamento ou mensagem de erro.
  * @return array|string
  */
-function book_service_for_client(int $clientId, int $barberId, int $serviceId, string $date, string $time)
+function book_services_for_client(int $clientId, int $barberId, array $serviceIds, string $date, string $time)
 {
     $client = find_user_by_id($clientId);
     if (!$client || ($client['role'] ?? '') !== 'cliente') {
@@ -820,11 +830,12 @@ function book_service_for_client(int $clientId, int $barberId, int $serviceId, s
     if (!$barber || ($barber['role'] ?? '') !== 'barbeiro' || empty($barber['active'])) {
         return 'Barbeiro inválido.';
     }
-    $service = find_service($serviceId);
-    if (!$service || empty($service['active'])) {
-        return 'Serviço inválido.';
+    $serviceIds = array_values(array_unique(array_filter(array_map('intval', $serviceIds))));
+    $services = services_by_ids($serviceIds);
+    if (!$services) {
+        return 'Selecione ao menos um serviço válido.';
     }
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+    if (!is_valid_iso_date($date)) {
         return 'Data inválida.';
     }
     $time = normalize_time($time, '');
@@ -837,7 +848,9 @@ function book_service_for_client(int $clientId, int $barberId, int $serviceId, s
         return 'Este cliente já tem agendamento neste dia. Só é permitido um horário por dia.';
     }
 
-    $duration = max(15, (int)($service['duration_min'] ?? 30));
+    $serviceIds = array_values(array_map(static fn($service) => (int)$service['id'], $services));
+    $duration = max(15, array_sum(array_map(static fn($service) => (int)($service['duration_min'] ?? 30), $services)));
+    $price = array_sum(array_map(static fn($service) => (float)($service['price'] ?? 0), $services));
 
     // Trava por barbeiro: fecha a janela entre checar disponibilidade e gravar,
     // evitando dois clientes reservando o mesmo horário simultaneamente.
@@ -859,17 +872,26 @@ function book_service_for_client(int $clientId, int $barberId, int $serviceId, s
             'client_name' => $client['name'] ?? '',
             'client_phone' => preg_replace('/\D+/', '', (string)($client['phone'] ?? '')),
             'barber_id' => $barberId,
-            'service_id' => $serviceId,
-            'service_ids' => [$serviceId],
+            'service_id' => $serviceIds[0],
+            'service_ids' => $serviceIds,
             'date' => $date,
             'time' => $time,
             'status' => 'agendado',
             'notes' => null,
-            'price' => (float)($service['price'] ?? 0),
+            'price' => $price,
             'products' => [],
         ]);
     } finally {
         flock($lock, LOCK_UN);
         fclose($lock);
     }
+}
+
+/**
+ * Mantém compatibilidade com os fluxos que agendam apenas um serviço.
+ * @return array|string
+ */
+function book_service_for_client(int $clientId, int $barberId, int $serviceId, string $date, string $time)
+{
+    return book_services_for_client($clientId, $barberId, [$serviceId], $date, $time);
 }

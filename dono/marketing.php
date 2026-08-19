@@ -329,18 +329,18 @@ admin_layout_start('Marketing', 'dono', 'marketing');
           <input type="hidden" name="action" value="save_aviso">
           <div>
             <label class="form-label">Para quem</label>
-            <select name="type" id="avisoType" class="form-select" required>
+            <select name="type" id="avisoType" class="form-select" required aria-label="Público do aviso">
               <option value="aniversariantes">Aniversariantes do mês</option>
               <option value="inativos">Clientes inativos (+45 dias)</option>
             </select>
           </div>
           <div>
             <label class="form-label">Título</label>
-            <input name="name" id="avisoName" class="form-control" placeholder="Ex: Feliz aniversário">
+            <input name="name" id="avisoName" class="form-control" placeholder="Ex: Feliz aniversário" aria-label="Nome do aviso">
           </div>
           <div>
             <label class="form-label">Mensagem do aviso</label>
-            <textarea name="message" class="form-control" rows="4" required placeholder="Texto que o cliente verá em Notificações no app."></textarea>
+            <textarea name="message" class="form-control" rows="4" required placeholder="Texto que o cliente verá em Notificações no app." aria-label="Mensagem do aviso"></textarea>
           </div>
           <div class="d-flex gap-2 justify-content-end">
             <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
@@ -365,12 +365,12 @@ admin_layout_start('Marketing', 'dono', 'marketing');
           <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
           <div>
             <label class="form-label">Nome da campanha</label>
-            <input name="name" class="form-control" required placeholder="Ex: Volta VIP" value="<?= e($edit['name'] ?? '') ?>">
+            <input name="name" class="form-control" required placeholder="Ex: Volta VIP" value="<?= e($edit['name'] ?? '') ?>" aria-label="Nome da campanha">
           </div>
           <div class="row g-2">
             <div class="col-md-6">
               <label class="form-label">Público</label>
-              <select name="type" class="form-select" required>
+              <select name="type" class="form-select" required aria-label="Público da campanha">
                 <?php
                 $type = $edit['type'] ?? 'promocional';
                 $types = [
@@ -386,7 +386,7 @@ admin_layout_start('Marketing', 'dono', 'marketing');
             </div>
             <div class="col-md-6">
               <label class="form-label">Status</label>
-              <select name="status" class="form-select">
+              <select name="status" class="form-select" aria-label="Status da campanha">
                 <?php
                 $st = $edit['status'] ?? 'rascunho';
                 foreach (['rascunho' => 'Rascunho', 'ativa' => 'Ativa', 'enviada' => 'Enviada'] as $val => $label):
@@ -398,7 +398,7 @@ admin_layout_start('Marketing', 'dono', 'marketing');
           </div>
           <div>
             <label class="form-label">Mensagem do WhatsApp</label>
-            <textarea name="message" class="form-control" rows="5" required placeholder="Ex: Oi {primeiro_nome}! Faz tempo que não te vemos. Agende com 10% OFF esta semana."><?= e($edit['message'] ?? '') ?></textarea>
+            <textarea name="message" class="form-control" rows="5" required placeholder="Ex: Oi {primeiro_nome}! Faz tempo que não te vemos. Agende com 10% OFF esta semana." aria-label="Mensagem da campanha"><?= e($edit['message'] ?? '') ?></textarea>
             <div class="form-text">Texto livre, enviado do jeito que está escrito. Use <code>{nome}</code> ou <code>{primeiro_nome}</code> pra personalizar por cliente.</div>
           </div>
           <div class="d-flex gap-2 justify-content-end">

@@ -5,7 +5,7 @@ require_once __DIR__ . '/../includes/layout.php';
 $user = require_role(['dono']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $type = $_POST['type'] === 'saida' ? 'saida' : 'entrada';
+    $type = ($_POST['type'] ?? '') === 'saida' ? 'saida' : 'entrada';
     $amount = (float)($_POST['amount'] ?? 0);
     $desc = trim($_POST['description'] ?? '');
     $cat = trim($_POST['category'] ?? 'geral');
@@ -137,24 +137,24 @@ admin_layout_start('Financeiro (DRE)', 'dono', 'financeiro');
         <form method="post" class="vstack gap-3">
           <div>
             <label class="form-label">Tipo</label>
-            <select name="type" class="form-select" id="cashType">
+            <select name="type" class="form-select" id="cashType" aria-label="Tipo de lançamento">
               <option value="saida">Saída (Despesa)</option>
               <option value="entrada">Entrada (Receita)</option>
             </select>
           </div>
           <div>
             <label class="form-label">Categoria</label>
-            <select name="category" class="form-select" id="cashCategory">
+            <select name="category" class="form-select" id="cashCategory" aria-label="Categoria do lançamento">
               <!-- Populado via JS -->
             </select>
           </div>
           <div>
             <label class="form-label">Descrição</label>
-            <input name="description" class="form-control" placeholder="Ex: Conta de Luz" required>
+            <input name="description" class="form-control" placeholder="Ex: Conta de Luz" required aria-label="Descrição do lançamento">
           </div>
           <div>
             <label class="form-label">Valor</label>
-            <input type="number" step="0.01" name="amount" class="form-control" required>
+            <input type="number" step="0.01" min="0.01" name="amount" class="form-control" required aria-label="Valor do lançamento">
           </div>
           <div class="d-flex gap-2 justify-content-end">
             <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>

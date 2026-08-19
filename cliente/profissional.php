@@ -11,7 +11,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $waitlist = store_read('waitlist') ?: [];
         $bId = (int)($_POST['barber_id'] ?? 0);
-        $dt = $_POST['date'] ?? date('Y-m-d');
+        $dt = (string)($_POST['date'] ?? date('Y-m-d'));
+        $waitlistBarber = find_user_by_id($bId);
+        if (!is_valid_iso_date($dt) || !$waitlistBarber || ($waitlistBarber['role'] ?? '') !== 'barbeiro' || empty($waitlistBarber['active'])) {
+            flash('danger', 'Data ou profissional inválido.');
+            redirect(url('cliente/profissional.php'));
+        }
         $waitlist[] = [
             'id' => uniqid(),
             'client_id' => $user['id'],
@@ -29,7 +34,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(url('cliente/profissional.php' . ($qs ? '?' . http_build_query($qs) : '')));
     }
     if (isset($_POST['services'])) {
-        $ids = array_values(array_filter(array_map('intval', $_POST['services'] ?? [])));
+        $servicesInput = $_POST['services'];
+        $ids = is_array($servicesInput)
+            ? array_values(array_unique(array_filter(array_map('intval', $servicesInput))))
+            : [];
+        $pickedServices = services_by_ids($ids);
+        $ids = array_values(array_map(static fn($service) => (int)$service['id'], $pickedServices));
         if (!$ids) {
             flash('warning', 'Selecione pelo menos um serviço.');
             redirect(url('cliente/'));
@@ -38,7 +48,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$serviceIds = array_map('intval', $_SESSION['booking']['services'] ?? []);
+$sessionServiceIds = $_SESSION['booking']['services'] ?? [];
+$serviceIds = is_array($sessionServiceIds)
+    ? array_values(array_unique(array_filter(array_map('intval', $sessionServiceIds))))
+    : [];
 if (!$serviceIds) {
     redirect(url('cliente/'));
 }
@@ -56,7 +69,8 @@ if (isset($_GET['remove_service'])) {
 }
 if (isset($_GET['add_service'])) {
     $aid = (int) $_GET['add_service'];
-    if ($aid > 0 && !in_array($aid, $serviceIds, true)) {
+    $additionalService = $aid > 0 ? find_service($aid) : null;
+    if ($additionalService && !empty($additionalService['active']) && !in_array($aid, $serviceIds, true)) {
         $serviceIds[] = $aid;
         $_SESSION['booking']['services'] = $serviceIds;
     }
@@ -78,6 +92,13 @@ $_SESSION['booking']['barber_id'] = $barberId;
 $barber = find_user_by_id($barberId);
 
 $services = services_by_ids($serviceIds);
+if (!$services) {
+    unset($_SESSION['booking']);
+    flash('warning', 'Os serviços selecionados não estão mais disponíveis.');
+    redirect(url('cliente/'));
+}
+$serviceIds = array_values(array_map(static fn($service) => (int)$service['id'], $services));
+$_SESSION['booking']['services'] = $serviceIds;
 $duration = max(60, array_sum(array_map(fn($s) => (int)$s['duration_min'], $services)));
 $primary = $services[0] ?? null;
 
