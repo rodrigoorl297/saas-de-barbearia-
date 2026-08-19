@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $user = current_user();
 $mineToday = appointments_enriched(fn($a) => (int)$a['barber_id'] === (int)$user['id'] && ($a['date'] ?? '') === $today);
-$doneToday = count(array_filter($mineToday, fn($a) => ($a['status'] ?? '') === 'concluido'));
+$dayStats = barber_daily_stats((int)$user['id'], $today);
 $openToday = count(array_filter($mineToday, fn($a) => !in_array($a['status'] ?? '', ['concluido', 'cancelado', 'faltou'], true)));
 $avatar = trim((string)($user['avatar'] ?? ''));
 $initials = '';
@@ -88,9 +88,10 @@ barber_shell_start('', 'conta');
     <p class="bb-profile-mail"><?= e($user['email'] ?? '') ?></p>
   </div>
 
-  <div class="bb-kpis">
+  <div class="bb-kpis bb-kpis--3">
     <div class="bb-kpi"><span>Na fila hoje</span><strong><?= (int)$openToday ?></strong></div>
-    <div class="bb-kpi"><span>Concluídos</span><strong><?= (int)$doneToday ?></strong></div>
+    <div class="bb-kpi"><span>Cortes hoje</span><strong><?= (int)$dayStats['cuts'] ?></strong></div>
+    <div class="bb-kpi bb-kpi--accent"><span>Faturado</span><strong class="bb-money"><?= e(money((float)$dayStats['total'])) ?></strong></div>
   </div>
 
   <div class="bb-list">
@@ -125,10 +126,10 @@ barber_shell_start('', 'conta');
   <a class="bb-btn bb-btn--ghost bb-btn--block bb-logout" href="<?= e(url('logout.php')) ?>">Sair da conta</a>
 </section>
 
-<div class="offcanvas offcanvas-bottom bb-sheet" tabindex="-1" id="accountSettings">
+<div class="offcanvas offcanvas-bottom bb-sheet" tabindex="-1" id="accountSettings" aria-labelledby="accountSettingsTitle">
   <div class="bb-sheet-head">
     <div>
-      <h2 class="bb-sheet-title">Dados da conta</h2>
+      <h2 class="bb-sheet-title" id="accountSettingsTitle">Dados da conta</h2>
       <div class="bb-sheet-sub">Ajuste suas informações</div>
     </div>
     <button type="button" class="bb-sheet-close" data-bs-dismiss="offcanvas" aria-label="Fechar">×</button>

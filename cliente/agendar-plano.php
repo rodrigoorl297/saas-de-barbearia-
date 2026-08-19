@@ -158,15 +158,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['time'], $_POST['date'
     redirect(url('cliente/confirmar.php'));
 }
 
-$thumbs = [
-    'https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=300&h=300&fit=crop',
-];
-
 render_head('Agendar plano', true);
 client_shell_start('conta');
 ?>
 <div class="plan-book-overlay">
+  <?php client_booking_stepper(3); ?>
   <div class="plan-book-modal">
     <a class="booking-back plan-book-back" href="<?= e(url('cliente/conta.php')) ?>" aria-label="Voltar"><?= icon_svg('back', 18) ?></a>
 
@@ -208,10 +204,10 @@ client_shell_start('conta');
       </div>
     <?php endif; ?>
 
-    <button type="button" class="plan-book-add-btn" id="btn-open-extras">Adicionar serviços +</button>
+    <button type="button" class="plan-book-add-btn" id="btn-open-extras" aria-haspopup="dialog" aria-controls="extras-modal">Adicionar serviços +</button>
 
     <?php if ($barber): ?>
-      <button type="button" class="booking-barber-select" id="btn-open-barbers" style="margin-top:14px">
+      <button type="button" class="booking-barber-select plan-book-barber" id="btn-open-barbers" aria-haspopup="dialog" aria-controls="barber-modal">
         <span class="booking-barber-mini">
           <?php if ($barberPhoto): ?><img src="<?= e($barberPhoto) ?>" alt=""><?php else: ?><span class="mini-fallback"><?= e(initials($barber['name'])) ?></span><?php endif; ?>
         </span>
@@ -247,7 +243,7 @@ client_shell_start('conta');
       <input type="hidden" name="date" value="<?= e($date) ?>">
       <div class="booking-slots">
         <?php if ($dayEsgotado || !$slots): ?>
-          <div class="alert-as warning" style="width:100%">Sem horários neste dia.</div>
+          <div class="client-empty-state client-empty-state--compact" role="status"><span class="client-empty-icon"><?= icon_svg('calendar', 24) ?></span><strong>Sem horários neste dia</strong><p>Selecione outra data para continuar.</p></div>
         <?php else: ?>
           <?php foreach ($slots as $slot): ?>
             <label class="booking-slot">
@@ -261,18 +257,22 @@ client_shell_start('conta');
   </div>
 </div>
 
-<dialog id="extras-modal" class="barber-modal">
+<dialog id="extras-modal" class="barber-modal" aria-labelledby="plan-extras-modal-title">
   <div class="barber-modal-inner">
-    <h2>Adicionar serviços</h2>
+    <h2 id="plan-extras-modal-title">Adicionar serviços</h2>
     <div class="plan-extras-grid">
       <?php if (!$addonCatalog): ?>
         <p class="page-sub">Nenhum extra disponível.</p>
       <?php else: ?>
-        <?php foreach ($addonCatalog as $i => $ex):
-            $img = !empty($ex['image_url']) ? media_url($ex['image_url']) : $thumbs[$i % count($thumbs)];
+        <?php foreach ($addonCatalog as $ex):
+            $img = !empty($ex['image_url']) ? media_url($ex['image_url']) : '';
         ?>
           <a class="plan-extra-pick" href="?plan_id=<?= $planId ?>&add_extra=<?= (int)$ex['id'] ?>&date=<?= e($date) ?>&barber_id=<?= $barberId ?>&week=<?= $week ?>">
-            <img src="<?= e($img) ?>" alt="">
+            <?php if ($img): ?>
+              <img src="<?= e($img) ?>" alt="">
+            <?php else: ?>
+              <span class="service-visual-fallback" aria-hidden="true"><?= icon_svg('scissors', 20) ?><b><?= e(initials($ex['name'])) ?></b></span>
+            <?php endif; ?>
             <div>
               <strong><?= e($ex['name']) ?></strong>
               <span><?= e(money((float)$ex['price'])) ?></span>
@@ -285,9 +285,9 @@ client_shell_start('conta');
   </div>
 </dialog>
 
-<dialog id="barber-modal" class="barber-modal">
+<dialog id="barber-modal" class="barber-modal" aria-labelledby="plan-barber-modal-title">
   <div class="barber-modal-inner">
-    <h2>Selecione o profissional:</h2>
+    <h2 id="plan-barber-modal-title">Selecione o profissional:</h2>
     <div class="barber-modal-list">
       <?php foreach ($barbers as $b):
           $photo = media_url($b['avatar'] ?? '');
@@ -308,7 +308,7 @@ client_shell_start('conta');
 <div class="botao-avancar-wrapper" id="botao-avancar-wrapper">
   <div class="botao-avancar-inner">
     <div class="botao-avancar-container">
-      <button type="button" class="botao-avancar" id="btn-avancar-plan">Avançar</button>
+      <button type="button" class="botao-avancar" id="btn-avancar-plan"><span>Continuar</span><small id="plan-time-context">Selecione um horário</small></button>
     </div>
   </div>
 </div>
@@ -328,6 +328,8 @@ client_shell_start('conta');
       document.querySelectorAll('.booking-slot').forEach((l) => l.classList.remove('active'));
       input.closest('.booking-slot')?.classList.add('active');
       wrap?.classList.add('show');
+      const context = document.getElementById('plan-time-context');
+      if (context) context.textContent = `${input.value} · confirmar dados`;
     });
   });
   document.getElementById('btn-avancar-plan')?.addEventListener('click', () => {

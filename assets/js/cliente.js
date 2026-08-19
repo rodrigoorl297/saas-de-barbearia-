@@ -5,24 +5,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function refresh() {
     let count = 0;
+    let duration = 0;
+    let total = 0;
     cards.forEach((card) => {
       const input = card.querySelector('.checkbox-circular-input');
-      if (input && input.checked) count += 1;
+      const selected = Boolean(input?.checked);
+      card.classList.toggle('is-selected', selected);
+      if (selected) {
+        count += 1;
+        duration += Number(card.dataset.duration || 0);
+        total += Number(card.dataset.price || 0);
+      }
     });
     if (avancar) avancar.classList.toggle('show', count > 0);
+    const context = document.getElementById('cta-service-context');
+    const summaryCount = document.getElementById('service-summary-count');
+    const summaryDetails = document.getElementById('service-summary-details');
+    const serviceWord = count === 1 ? 'serviço' : 'serviços';
+    if (context) context.textContent = count ? `${count} ${serviceWord}` : 'Selecione um serviço';
+    if (summaryCount) summaryCount.textContent = count ? `${count} ${serviceWord} selecionado${count === 1 ? '' : 's'}` : 'Nenhum serviço selecionado';
+    if (summaryDetails) {
+      summaryDetails.textContent = count
+        ? `${duration} min · ${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+        : '';
+    }
   }
 
   cards.forEach((card) => {
-    const detalhes = card.querySelector('.card-servico-detalhes');
     const input = card.querySelector('.checkbox-circular-input');
-    if (!detalhes || !input) return;
-
-    detalhes.addEventListener('click', (e) => {
-      if (e.target.closest('.checkbox-circular-container')) return;
-      input.checked = !input.checked;
-      refresh();
-    });
-
+    if (!input) return;
     input.addEventListener('change', refresh);
   });
 
@@ -58,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const allCards = Array.from(track.querySelectorAll('.plan-offer-card'));
   const total = allCards.length;
   const n = origCards.length;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function cardCenter(card) {
     return card.offsetLeft + card.offsetWidth / 2;
@@ -65,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function scrollToCard(card, behavior = 'smooth') {
     const left = card.offsetLeft - (track.clientWidth - card.offsetWidth) / 2;
-    track.scrollTo({ left: Math.max(0, left), behavior });
+    track.scrollTo({ left: Math.max(0, left), behavior: reduceMotion || behavior === 'instant' ? 'auto' : behavior });
   }
 
   // Começa no primeiro card real (após os clones do início)
@@ -133,4 +145,3 @@ document.addEventListener('DOMContentLoaded', () => {
     if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; }
   }, true);
 });
-

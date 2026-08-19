@@ -115,6 +115,15 @@ function normalize_time(?string $time, string $fallback = '09:00'): string
     return $fallback;
 }
 
+function wa_mask_phone(string $phone): string
+{
+    $digits = preg_replace('/\D+/', '', $phone) ?? '';
+    if (strlen($digits) <= 4) {
+        return str_repeat('*', strlen($digits));
+    }
+    return substr($digits, 0, 4) . str_repeat('*', strlen($digits) - 6) . substr($digits, -2);
+}
+
 function redirect(string $path): never
 {
     header('Location: ' . $path);
@@ -471,6 +480,7 @@ function status_label(string $status): string
     return match ($status) {
         'agendado' => 'Agendado',
         'confirmado' => 'Confirmado',
+        'em_andamento' => 'Em andamento',
         'concluido' => 'Concluído',
         'cancelado' => 'Cancelado',
         'faltou' => 'Faltou',
@@ -483,6 +493,7 @@ function status_badge(string $status): string
     $class = match ($status) {
         'agendado' => 'warning',
         'confirmado' => 'info',
+        'em_andamento' => 'primary',
         'concluido' => 'success',
         'cancelado' => 'secondary',
         'faltou' => 'danger',
@@ -560,6 +571,38 @@ function appointments_enriched(?callable $filter = null): array
     return $out;
 }
 
+/** Cortes concluídos e faturamento de um barbeiro em um dia. */
+function barber_daily_stats(int $barberId, string $date): array
+{
+    $done = appointments_enriched(fn($a) =>
+        (int)$a['barber_id'] === $barberId
+        && ($a['date'] ?? '') === $date
+        && ($a['status'] ?? '') === 'concluido'
+    );
+    return [
+        'cuts' => count($done),
+        'total' => array_sum(array_map(fn($a) => (float)($a['price'] ?? 0), $done)),
+    ];
+}
+
+/** Mapa barber_id => ['cuts' => int, 'total' => float] para um dia. */
+function barbers_daily_stats(string $date): array
+{
+    $map = [];
+    foreach (appointments_enriched(fn($a) =>
+        ($a['date'] ?? '') === $date
+        && ($a['status'] ?? '') === 'concluido'
+    ) as $a) {
+        $bid = (int)$a['barber_id'];
+        if (!isset($map[$bid])) {
+            $map[$bid] = ['cuts' => 0, 'total' => 0.0];
+        }
+        $map[$bid]['cuts']++;
+        $map[$bid]['total'] += (float)($a['price'] ?? 0);
+    }
+    return $map;
+}
+
 function available_slots(int $barberId, string $date, int $durationMin = 60): array
 {
     $cfg = settings();
@@ -598,7 +641,7 @@ function available_slots(int $barberId, string $date, int $durationMin = 60): ar
     $busy = appointments_enriched(function ($a) use ($barberId, $date) {
         return (int)$a['barber_id'] === $barberId
             && $a['date'] === $date
-            && in_array($a['status'], ['agendado', 'confirmado', 'concluido'], true);
+            && in_array($a['status'], ['agendado', 'confirmado', 'em_andamento', 'concluido'], true);
     });
 
     $slots = [];
@@ -649,7 +692,7 @@ function appointment_slot_conflicts(int $barberId, string $date, string $time, i
     $busy = appointments_enriched(function ($a) use ($barberId, $date) {
         return (int)$a['barber_id'] === $barberId
             && $a['date'] === $date
-            && in_array($a['status'], ['agendado', 'confirmado', 'concluido'], true);
+            && in_array($a['status'], ['agendado', 'confirmado', 'em_andamento', 'concluido'], true);
     });
 
     foreach ($busy as $b) {
@@ -735,7 +778,7 @@ function upsert_client(array $data): array
 }
 
 /**
- * Cliente já tem horário no dia? (agendado/confirmado/concluído bloqueiam; cancelado/faltou liberam).
+ * Cliente já tem horário no dia? (agendado/confirmado/em andamento/concluído bloqueiam; cancelado/faltou liberam).
  */
 function client_already_booked_on_date(int $clientId, string $date, string $phone = ''): bool
 {
@@ -743,7 +786,7 @@ function client_already_booked_on_date(int $clientId, string $date, string $phon
         return false;
     }
     $phone = preg_replace('/\D+/', '', $phone);
-    $blocking = ['agendado', 'confirmado', 'concluido'];
+    $blocking = ['agendado', 'confirmado', 'em_andamento', 'concluido'];
 
     foreach (store_read('appointments') as $a) {
         if (($a['date'] ?? '') !== $date) {

@@ -24,7 +24,7 @@ if ($rate > 1) {
 }
 $percent = round($rate * 100, 2);
 
-$all = appointments_enriched(fn($a) => str_starts_with($a['date'], $month) && in_array($a['status'], ['concluido', 'confirmado', 'agendado'], true));
+$all = appointments_enriched(fn($a) => str_starts_with($a['date'], $month) && in_array($a['status'], ['concluido', 'em_andamento', 'confirmado', 'agendado'], true));
 
 $map = [];
 foreach ($all as $a) {

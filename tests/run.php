@@ -61,6 +61,7 @@ check('valor inválido usa o fallback', normalize_time('não é hora', '09:00') 
 
 echo "== status_label ==\n";
 check('status conhecido traduz para rótulo em pt-BR', status_label('confirmado') === 'Confirmado');
+check('atendimento iniciado aparece como Em andamento', status_label('em_andamento') === 'Em andamento');
 check('status desconhecido é devolvido sem alteração', status_label('xyz') === 'xyz');
 
 echo "== wa_mask_phone (log de campanhas) ==\n";

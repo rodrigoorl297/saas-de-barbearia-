@@ -6,86 +6,85 @@ $shop = settings();
 $services = active_services();
 $selected = $_SESSION['booking']['services'] ?? [];
 
-$thumbs = [
-    'https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1605497788044-5a32c7078486?w=300&h=300&fit=crop',
-];
-
 render_head('Agendar', true);
 client_shell_start('agendar');
 $shopName = shop_brand_name();
-$logoUrl = shop_logo_path();
 ?>
 <div class="agendar-container">
-  <div class="logo-historico">
-    <?php if ($logoUrl !== ''): ?>
-      <div class="img-agendar img-agendar--photo" aria-label="<?= e($shopName) ?>">
-        <img src="<?= e(media_url($logoUrl)) ?>" alt="<?= e($shopName) ?>">
-      </div>
-    <?php else: ?>
-      <div class="img-agendar" aria-label="<?= e($shopName) ?>">
-        <?= e(str_upper(str_cut($shopName, 0, 2))) ?>
-      </div>
-    <?php endif; ?>
-  </div>
+  <?php client_booking_stepper(1); ?>
 
-  <div class="shop-name-client"><?= e(str_upper($shopName)) ?></div>
-
-  <div class="card-titulo-container">
-    <div class="titulo-container">
-      <span>Escolha um serviço para agendar</span>
-    </div>
-  </div>
+  <header class="client-page-intro">
+    <span class="client-eyebrow"><?= e($shopName) ?></span>
+    <h1>Escolha seus serviços</h1>
+    <p>Selecione uma ou mais opções. Você poderá revisar tudo antes de confirmar.</p>
+  </header>
 
   <?php render_flash_client(); ?>
 
   <?php if (!$services): ?>
-    <p class="historico-empty" style="text-align:center;padding:0 24px">Nenhum serviço disponível no momento. Fale com a barbearia.</p>
+    <div class="client-empty-state" role="status">
+      <span class="client-empty-icon"><?= icon_svg('scissors', 26) ?></span>
+      <strong>Nenhum serviço disponível</strong>
+      <p>Fale com a barbearia para consultar novas opções.</p>
+    </div>
   <?php endif; ?>
 
   <form id="form-servicos" action="<?= e(url('cliente/profissional.php')) ?>" method="post">
     <div class="card-servico-container">
-      <?php foreach ($services as $i => $svc): ?>
+      <?php foreach ($services as $svc): ?>
         <?php
           $checked = in_array((int)$svc['id'], array_map('intval', $selected), true);
-          $img = !empty($svc['image_url']) ? media_url($svc['image_url']) : $thumbs[$i % count($thumbs)];
+          $img = !empty($svc['image_url']) ? media_url($svc['image_url']) : '';
         ?>
-        <div class="card-servico">
+        <label class="card-servico <?= $checked ? 'is-selected' : '' ?>"
+               data-price="<?= e((string)$svc['price']) ?>"
+               data-duration="<?= (int)$svc['duration_min'] ?>">
+          <input class="checkbox-circular-input" type="checkbox" name="services[]" value="<?= (int)$svc['id'] ?>" <?= $checked ? 'checked' : '' ?>>
           <div class="card-servico-imagem">
-            <img src="<?= e($img) ?>" alt="<?= e($svc['name']) ?>" loading="lazy">
+            <?php if ($img !== ''): ?>
+              <img src="<?= e($img) ?>" alt="" loading="lazy">
+            <?php else: ?>
+              <span class="service-visual-fallback" aria-hidden="true">
+                <?= icon_svg('scissors', 28) ?>
+                <b><?= e(initials($svc['name'])) ?></b>
+              </span>
+            <?php endif; ?>
           </div>
           <div class="card-servico-detalhes">
             <div class="servico-detalhes">
               <div class="card-servico-cabecalho">
-                <h3 class="titulo-servico"><?= e(str_upper($svc['name'])) ?></h3>
+                <h2 class="titulo-servico"><?= e($svc['name']) ?></h2>
               </div>
-              <span class="preco"><?= e(money((float)$svc['price'])) ?></span>
-              <?php if ((int)$svc['duration_min'] > 0): ?>
-                <span class="tempo"><?= (int)$svc['duration_min'] ?> min</span>
-              <?php endif; ?>
+              <div class="service-facts">
+                <?php if ((int)$svc['duration_min'] > 0): ?><span class="tempo"><?= icon_svg('calendar', 14) ?> <?= (int)$svc['duration_min'] ?> min</span><?php endif; ?>
+                <strong class="preco"><?= e(money((float)$svc['price'])) ?></strong>
+              </div>
               <?php if (!empty($svc['description'])): ?>
                 <span class="descricao"><?= e($svc['description']) ?></span>
               <?php endif; ?>
             </div>
-            <label class="checkbox-circular-container" onclick="event.stopPropagation()">
-              <input class="checkbox-circular-input" type="checkbox" name="services[]" value="<?= (int)$svc['id'] ?>" <?= $checked ? 'checked' : '' ?>>
+            <span class="checkbox-circular-container" aria-hidden="true">
               <span class="checkbox-circular-custom"></span>
-            </label>
+            </span>
           </div>
-        </div>
+        </label>
       <?php endforeach; ?>
     </div>
   </form>
+
+  <div class="client-live-summary" id="service-live-summary" aria-live="polite">
+    <span id="service-summary-count">Nenhum serviço selecionado</span>
+    <span id="service-summary-details"></span>
+  </div>
 </div>
 
 <div class="botao-avancar-wrapper <?= $selected ? 'show' : '' ?>" id="botao-avancar-wrapper">
   <div class="botao-avancar-inner">
     <div class="botao-avancar-container">
-      <button type="button" class="botao-avancar">Avançar</button>
+      <button type="button" class="botao-avancar">
+        <span>Continuar</span>
+        <small id="cta-service-context">Selecione um serviço</small>
+      </button>
     </div>
   </div>
 </div>

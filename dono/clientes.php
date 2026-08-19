@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($wantNow && ($serviceId < 1 || $barberId < 1)) {
-            flash('danger', 'Para registrar corte imediato, informe serviço e barbeiro.');
+            flash('danger', 'Para registrar o corte, informe serviço e barbeiro.');
             redirect(url('dono/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
 
@@ -55,30 +55,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($wantNow) {
                 $nowTime = date('H:i');
-                // Salva direto como concluido
-                $appointment = [
+                $new = save_appointment([
                     'client_id' => (int)$client['id'],
                     'client_name' => $client['name'],
                     'client_phone' => $client['phone'],
                     'barber_id' => $barberId,
                     'service_id' => $serviceId,
+                    'service_ids' => [$serviceId],
                     'date' => $today,
                     'time' => $nowTime,
-                    'status' => 'concluido',
-                    'price' => (float)($svc['price'] ?? 0)
-                ];
-                save_appointment($appointment);
-                
-                // Recarrega o appointment salvo para ter o ID para o sync
-                $all = store_read('appointments');
-                $savedAppt = end($all);
-                
-                sync_appointment_cash($savedAppt, $user['id'] ?? 1);
-                sync_appointment_loyalty($savedAppt);
-                
-                $msg .= ' Corte registrado agora: ' . ($svc['name'] ?? '') . ' com ' . ($barber['name'] ?? '') . '.';
-                flash('success', $msg);
-                redirect(url('dono/clientes.php'));
+                    'status' => 'em_andamento',
+                    'notes' => 'Walk-in',
+                    'price' => (float)($svc['price'] ?? 0),
+                    'products' => [],
+                ]);
+                flash('success', $msg . ' Atendimento iniciado e marcado como Em andamento.');
+                redirect(url('dono/agenda.php?date=' . urlencode($today)));
             } else {
                 $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
                 if (is_string($booked)) {
@@ -149,8 +141,8 @@ admin_layout_start('Clientes', 'dono', 'clientes');
     </div>
     <div class="d-flex gap-2 align-items-center">
       <form method="get" action="<?= e(url('dono/clientes.php')) ?>" class="d-flex m-0">
-        <input type="search" name="q" value="<?= e($q) ?>" class="form-control" placeholder="Buscar nome ou telefone" style="min-width:250px">
-        <button type="submit" class="btn btn-secondary ms-2">🔍</button>
+        <input type="search" name="q" value="<?= e($q) ?>" class="form-control admin-search-field" placeholder="Buscar nome ou telefone" aria-label="Buscar clientes">
+        <button type="submit" class="btn btn-ghost ms-2" aria-label="Buscar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
       </form>
       <button type="button" class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#clientModal">+ Novo cliente</button>
     </div>
@@ -191,7 +183,7 @@ admin_layout_start('Clientes', 'dono', 'clientes');
           </tr>
         <?php endforeach; ?>
         <?php if (!$clients): ?>
-          <tr><td colspan="6" class="text-secondary text-center py-4">Nenhum cliente ainda.</td></tr>
+          <tr><td colspan="6"><div class="empty-state table-empty"><strong>Nenhum cliente cadastrado</strong><p>Comece cadastrando o primeiro cliente para acompanhar visitas e agendamentos.</p><button type="button" class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#clientModal">Cadastrar cliente</button></div></td></tr>
         <?php endif; ?>
         </tbody>
       </table>
@@ -228,17 +220,20 @@ admin_layout_start('Clientes', 'dono', 'clientes');
           </div>
 
           <hr class="my-1">
-          <div class="form-check mb-2">
-            <input class="form-check-input action-radio" type="radio" name="booking_type" value="book" id="alsoBook">
-            <label class="form-check-label" for="alsoBook">Agendar horário para o futuro</label>
-          </div>
-          <div class="form-check mb-2">
-            <input class="form-check-input action-radio" type="radio" name="booking_type" value="now" id="cutNow">
-            <label class="form-check-label text-success fw-bold" for="cutNow">Registrar corte de agora (Walk-in)</label>
-            <div class="form-text mt-0">Finaliza direto sem bloquear agenda, lança no caixa e gera pontos.</div>
-            <input type="hidden" name="also_book" id="alsoBookHidden" value="0">
-            <input type="hidden" name="cut_now" id="cutNowHidden" value="0">
-          </div>
+          <ul class="nav nav-tabs client-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button type="button" class="nav-link active" data-tab="save" role="tab">Cadastro</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button type="button" class="nav-link" data-tab="book" role="tab">Agendar</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button type="button" class="nav-link text-success" data-tab="now" role="tab">Iniciar corte</button>
+            </li>
+          </ul>
+          <input type="hidden" name="also_book" id="alsoBookHidden" value="0">
+          <input type="hidden" name="cut_now" id="cutNowHidden" value="0">
+          <p class="form-text mb-2" id="tabHint">Salva só os dados do cliente.</p>
 
           <div id="bookFields" class="d-none">
             <div>
@@ -291,7 +286,7 @@ admin_layout_start('Clientes', 'dono', 'clientes');
             <?php else: ?>
               <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
             <?php endif; ?>
-            <button class="btn btn-accent" type="submit"><?= $edit ? 'Salvar' : 'Salvar cliente' ?></button>
+            <button class="btn btn-accent" type="submit" id="submitBtn"><?= $edit ? 'Salvar' : 'Salvar cliente' ?></button>
           </div>
         </form>
       </div>
@@ -302,8 +297,7 @@ admin_layout_start('Clientes', 'dono', 'clientes');
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const modal = document.getElementById('clientModal');
-  const also = document.getElementById('alsoBook');
-  const cutNow = document.getElementById('cutNow');
+  const tabs = document.querySelectorAll('.client-tabs .nav-link');
   const alsoBookHidden = document.getElementById('alsoBookHidden');
   const cutNowHidden = document.getElementById('cutNowHidden');
   const book = document.getElementById('bookFields');
@@ -311,30 +305,51 @@ document.addEventListener('DOMContentLoaded', () => {
   const barber = document.getElementById('bookBarber');
   const date = document.getElementById('bookDate');
   const time = document.getElementById('bookTime');
+  const tabHint = document.getElementById('tabHint');
+  const submitBtn = document.getElementById('submitBtn');
   const slotsUrl = <?= json_encode(url('api/slots.php')) ?>;
+  let activeTab = 'save';
+
+  const hints = {
+    save: 'Salva só os dados do cliente.',
+    book: 'Escolha serviço, barbeiro, data e horário para agendar.',
+    now: 'Inicia o atendimento como Em andamento. Quando terminar, finalize pela agenda.',
+  };
+  const submitLabels = {
+    save: <?= json_encode($edit ? 'Salvar' : 'Salvar cliente') ?>,
+    book: <?= json_encode($edit ? 'Salvar e agendar' : 'Salvar e agendar') ?>,
+    now: 'Iniciar atendimento',
+  };
+
+  function setTab(tab) {
+    activeTab = tab;
+    tabs.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
+    if (alsoBookHidden) alsoBookHidden.value = tab === 'book' ? '1' : '0';
+    if (cutNowHidden) cutNowHidden.value = tab === 'now' ? '1' : '0';
+    if (tabHint) tabHint.textContent = hints[tab] || hints.save;
+    if (submitBtn) submitBtn.textContent = submitLabels[tab] || submitLabels.save;
+    toggleBook();
+  }
 
   function toggleBook() {
     if (!book) return;
-    const isBook = !!(also && also.checked);
-    const isNow = !!(cutNow && cutNow.checked);
+    const isBook = activeTab === 'book';
+    const isNow = activeTab === 'now';
     const on = isBook || isNow;
-    
-    if (alsoBookHidden) alsoBookHidden.value = isBook ? '1' : '0';
-    if (cutNowHidden) cutNowHidden.value = isNow ? '1' : '0';
 
     book.classList.toggle('d-none', !on);
-    
+
     if (date && time) {
         date.closest('.col-6').classList.toggle('d-none', isNow);
         time.closest('.col-6').classList.toggle('d-none', isNow);
     }
-    
+
     [svc, barber].forEach((el) => {
       if (!el) return;
       if (on) el.setAttribute('required', 'required');
       else el.removeAttribute('required');
     });
-    
+
     [date, time].forEach((el) => {
       if (!el) return;
       if (isBook) el.setAttribute('required', 'required');
@@ -370,11 +385,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  document.querySelectorAll('.action-radio').forEach(r => r.addEventListener('change', toggleBook));
+  tabs.forEach((btn) => btn.addEventListener('click', () => setTab(btn.dataset.tab || 'save')));
   [svc, barber, date].forEach((el) => el && el.addEventListener('change', () => {
-      if (also && also.checked) loadSlots();
+      if (activeTab === 'book') loadSlots();
   }));
-  toggleBook();
+  setTab('save');
 
   <?php if ($edit): ?>
   if (modal && window.bootstrap) bootstrap.Modal.getOrCreateInstance(modal).show();

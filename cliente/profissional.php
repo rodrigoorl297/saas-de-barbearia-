@@ -145,12 +145,6 @@ $extrasAll = array_values(array_filter(
 shuffle($extrasAll);
 $extras = array_slice($extrasAll, 0, 3);
 
-$thumbs = [
-    'https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=300&h=300&fit=crop',
-    'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=300&h=300&fit=crop',
-];
-
 $barberPhoto = media_url($barber['avatar'] ?? '');
 $baseQs = http_build_query(array_filter(['week' => $week ?: null]));
 
@@ -158,14 +152,16 @@ render_head('Agendar', true);
 client_shell_start('agendar');
 ?>
 <div class="page-inner booking-flow">
+  <?php client_booking_stepper(3); ?>
   <?php render_flash_client(); ?>
+  <?php client_booking_summary(); ?>
 
   <div class="booking-sheet">
     <div class="booking-top">
       <a class="booking-back" href="<?= e(url('cliente/')) ?>" aria-label="Voltar">
         <?= icon_svg('back', 18) ?>
       </a>
-      <div class="booking-barber-hero">
+      <div class="booking-barber-hero" aria-hidden="true">
         <?php if ($barberPhoto): ?>
           <img src="<?= e($barberPhoto) ?>" alt="<?= e($barber['name'] ?? '') ?>">
         <?php else: ?>
@@ -186,17 +182,45 @@ client_shell_start('agendar');
       <?php endforeach; ?>
     </div>
 
+    <section class="booking-section" id="profissional" aria-labelledby="professional-title">
+      <div class="booking-section-heading">
+        <span class="client-eyebrow">Etapa 2</span>
+        <h1 id="professional-title">Escolha o profissional</h1>
+        <p>Toque para ver todos os profissionais disponíveis.</p>
+      </div>
+
+      <button type="button" class="booking-barber-select" id="btn-open-barbers" aria-haspopup="dialog" aria-controls="barber-modal">
+        <span class="booking-barber-mini">
+          <?php if ($barberPhoto): ?>
+            <img src="<?= e($barberPhoto) ?>" alt="">
+          <?php else: ?>
+            <span class="mini-fallback"><?= e(initials($barber['name'] ?? 'B')) ?></span>
+          <?php endif; ?>
+        </span>
+        <span class="booking-barber-text">
+          <span class="booking-barber-label">Profissional selecionado</span>
+          <span class="booking-barber-name"><?= e($barber['name'] ?? 'barbeiro') ?></span>
+        </span>
+        <span class="booking-barber-chev"><?= icon_svg('chevron', 16) ?></span>
+      </button>
+    </section>
+
+    <section class="booking-section" id="horarios" aria-labelledby="schedule-title">
+      <div class="booking-section-heading">
+        <span class="client-eyebrow">Etapa 3</span>
+        <h2 id="schedule-title">Escolha o dia e o horário</h2>
+        <p>Horários indisponíveis aparecem bloqueados.</p>
+      </div>
+
     <div class="booking-days-wrap">
-      <a class="booking-day-nav disabled"
-         href="#" style="visibility: hidden"
-         aria-label="Dias anteriores">‹</a>
+      <span class="booking-day-nav is-hidden" aria-hidden="true">‹</span>
 
       <div class="booking-days-grid">
         <?php foreach ($dias as $d):
             $href = '?week=' . $week . '&barber_id=' . $barberId . '&date=' . urlencode($d['ymd']);
         ?>
           <?php if ($d['esgotado']): ?>
-            <div class="booking-day esgotado">
+            <div class="booking-day esgotado" aria-disabled="true">
               <span class="esgotado-tag">Esgotado</span>
               <span class="booking-day-label"><?= e($d['label']) ?></span>
             </div>
@@ -208,37 +232,26 @@ client_shell_start('agendar');
         <?php endforeach; ?>
       </div>
 
-      <a class="booking-day-nav disabled" style="visibility: hidden" href="#" aria-label="Próximos dias">›</a>
+      <span class="booking-day-nav is-hidden" aria-hidden="true">›</span>
     </div>
-
-    <button type="button" class="booking-barber-select" id="btn-open-barbers">
-      <span class="booking-barber-mini">
-        <?php if ($barberPhoto): ?>
-          <img src="<?= e($barberPhoto) ?>" alt="">
-        <?php else: ?>
-          <span class="mini-fallback"><?= e(initials($barber['name'] ?? 'B')) ?></span>
-        <?php endif; ?>
-      </span>
-      <span class="booking-barber-text">
-        <span class="booking-barber-label">Profissional</span>
-        <span class="booking-barber-name"><?= e($barber['name'] ?? 'barbeiro') ?></span>
-      </span>
-      <span class="booking-barber-chev"><?= icon_svg('chevron', 16) ?></span>
-    </button>
 
     <?php if ($extrasAll): ?>
       <div class="booking-addons">
         <div class="booking-addons-header">
           <div class="booking-addons-title">Adicione também:</div>
-          <button type="button" class="booking-addons-ver-todos" id="btn-open-extras">Ver todos</button>
+          <button type="button" class="booking-addons-ver-todos" id="btn-open-extras" aria-haspopup="dialog" aria-controls="extras-modal">Ver todos</button>
         </div>
         <div class="booking-addons-track">
-          <?php foreach ($extras as $i => $ex):
-              $img = !empty($ex['image_url']) ? media_url($ex['image_url']) : $thumbs[$i % count($thumbs)];
+          <?php foreach ($extras as $ex):
+              $img = !empty($ex['image_url']) ? media_url($ex['image_url']) : '';
           ?>
             <a class="booking-addon-card" href="?add_service=<?= (int)$ex['id'] ?>&week=<?= $week ?>&date=<?= e($date) ?>&barber_id=<?= $barberId ?>">
               <div class="booking-addon-img">
-                <img src="<?= e($img) ?>" alt="<?= e($ex['name']) ?>" loading="lazy">
+                <?php if ($img): ?>
+                  <img src="<?= e($img) ?>" alt="" loading="lazy">
+                <?php else: ?>
+                  <span class="service-visual-fallback" aria-hidden="true"><?= icon_svg('scissors', 22) ?><b><?= e(initials($ex['name'])) ?></b></span>
+                <?php endif; ?>
                 <span class="booking-addon-plus">+</span>
               </div>
               <div class="booking-addon-meta">
@@ -251,16 +264,20 @@ client_shell_start('agendar');
       </div>
 
       <!-- Modal: todos os serviços disponíveis -->
-      <dialog id="extras-modal" class="barber-modal">
+      <dialog id="extras-modal" class="barber-modal" aria-labelledby="extras-modal-title">
         <div class="barber-modal-inner">
-          <h2>Serviços disponíveis</h2>
+          <h2 id="extras-modal-title">Serviços disponíveis</h2>
           <div class="extras-modal-list">
-            <?php foreach ($extrasAll as $i => $ex):
-                $img = !empty($ex['image_url']) ? media_url($ex['image_url']) : $thumbs[$i % count($thumbs)];
+            <?php foreach ($extrasAll as $ex):
+                $img = !empty($ex['image_url']) ? media_url($ex['image_url']) : '';
             ?>
               <a class="extras-modal-item" href="?add_service=<?= (int)$ex['id'] ?>&week=<?= $week ?>&date=<?= e($date) ?>&barber_id=<?= $barberId ?>">
                 <div class="extras-modal-img">
-                  <img src="<?= e($img) ?>" alt="<?= e($ex['name']) ?>" loading="lazy">
+                  <?php if ($img): ?>
+                    <img src="<?= e($img) ?>" alt="" loading="lazy">
+                  <?php else: ?>
+                    <span class="service-visual-fallback" aria-hidden="true"><?= icon_svg('scissors', 20) ?><b><?= e(initials($ex['name'])) ?></b></span>
+                  <?php endif; ?>
                 </div>
                 <div class="extras-modal-info">
                   <strong><?= e($ex['name']) ?></strong>
@@ -285,8 +302,12 @@ client_shell_start('agendar');
       <input type="hidden" name="barber_id" value="<?= (int)$barberId ?>">
       <div class="booking-slots">
         <?php if ($selectedDayEsgotado || !$slots): ?>
-          <div class="alert-as warning" style="width:100%">Sem horários disponíveis neste dia com este barbeiro.</div>
-          <button type="submit" form="form-waitlist" class="botao-avancar" style="width:100%; margin-top: 15px;">Entrar na Fila de Espera para este dia</button>
+          <div class="client-empty-state client-empty-state--compact" role="status">
+            <span class="client-empty-icon"><?= icon_svg('calendar', 24) ?></span>
+            <strong>Agenda cheia neste dia</strong>
+            <p>Escolha outra data ou entre na fila para ser avisado se surgir uma vaga.</p>
+          </div>
+          <button type="submit" form="form-waitlist" class="botao-avancar waitlist-button">Entrar na fila de espera</button>
         <?php else: ?>
           <?php foreach ($slots as $slot): ?>
             <label class="booking-slot">
@@ -297,12 +318,13 @@ client_shell_start('agendar');
         <?php endif; ?>
       </div>
     </form>
+    </section>
   </div>
 </div>
 
-<dialog id="barber-modal" class="barber-modal">
+<dialog id="barber-modal" class="barber-modal" aria-labelledby="barber-modal-title">
   <div class="barber-modal-inner">
-    <h2>Selecione o profissional:</h2>
+    <h2 id="barber-modal-title">Selecione o profissional:</h2>
     <div class="barber-modal-list">
       <?php foreach ($barbers as $b):
           $photo = media_url($b['avatar'] ?? '');
@@ -327,7 +349,10 @@ client_shell_start('agendar');
 <div class="botao-avancar-wrapper" id="botao-avancar-wrapper">
   <div class="botao-avancar-inner">
     <div class="botao-avancar-container">
-      <button type="button" class="botao-avancar" id="btn-avancar-hora">Avançar</button>
+      <button type="button" class="botao-avancar" id="btn-avancar-hora">
+        <span>Continuar</span>
+        <small id="time-cta-context">Selecione um horário</small>
+      </button>
     </div>
   </div>
 </div>
@@ -347,6 +372,8 @@ client_shell_start('agendar');
       document.querySelectorAll('.booking-slot').forEach((l) => l.classList.remove('active'));
       input.closest('.booking-slot')?.classList.add('active');
       wrap?.classList.add('show');
+      const context = document.getElementById('time-cta-context');
+      if (context) context.textContent = `${input.value} · confirmar dados`;
     });
   });
   document.getElementById('btn-avancar-hora')?.addEventListener('click', () => {

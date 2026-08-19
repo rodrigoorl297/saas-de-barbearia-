@@ -1,4 +1,29 @@
 (() => {
+  const layout = document.querySelector('.admin-layout');
+  const collapseButton = document.getElementById('sidebarCollapse');
+  const storageKey = 'barbaflow:sidebar-collapsed';
+
+  function setSidebarCollapsed(collapsed) {
+    if (!layout || !collapseButton) return;
+    layout.classList.toggle('sidebar-collapsed', collapsed);
+    collapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    collapseButton.setAttribute('aria-label', collapsed ? 'Expandir menu lateral' : 'Recolher menu lateral');
+    collapseButton.setAttribute('title', collapsed ? 'Expandir menu' : 'Recolher menu');
+  }
+
+  if (layout && collapseButton) {
+    let saved = false;
+    try { saved = window.localStorage.getItem(storageKey) === '1'; } catch (_) {}
+    setSidebarCollapsed(saved);
+    collapseButton.addEventListener('click', () => {
+      const collapsed = !layout.classList.contains('sidebar-collapsed');
+      setSidebarCollapsed(collapsed);
+      try { window.localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch (_) {}
+    });
+  }
+})();
+
+(() => {
   function ensurePreview(input) {
     let wrap = input.closest('.js-image-upload');
     if (!wrap) {

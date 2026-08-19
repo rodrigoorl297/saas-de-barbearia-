@@ -9,6 +9,7 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
     $date = $today;
 }
 $partial = isset($_GET['partial']) && $_GET['partial'] === '1';
+$openId = (int)($_GET['open'] ?? 0);
 
 $sellableProducts = array_values(array_filter(
     store_read('stock'),
@@ -24,6 +25,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach (store_read('appointments') as $a) {
             if ((int)$a['id'] !== $id || (int)$a['barber_id'] !== (int)$user['id']) {
                 continue;
+            }
+
+            if (($a['status'] ?? '') !== 'em_andamento') {
+                flash('warning', 'Inicie o corte antes de finalizar o atendimento.');
+                redirect(url('barbeiro/?date=' . urlencode($date)));
             }
 
             $oldProductsTotal = appointment_products_total($a);
@@ -91,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (isset($_POST['status'], $_POST['id'])) {
         $status = (string) $_POST['status'];
-        $allowed = ['agendado', 'confirmado', 'cancelado', 'faltou'];
+        $allowed = ['agendado', 'confirmado', 'em_andamento', 'cancelado', 'faltou'];
         if (in_array($status, $allowed, true)) {
             foreach (store_read('appointments') as $a) {
                 if ((int)$a['id'] === $id && (int)$a['barber_id'] === (int)$user['id']) {
@@ -110,6 +116,7 @@ $rows = appointments_enriched(fn($a) => (int)$a['barber_id'] === (int)$user['id'
 usort($rows, fn($a, $b) => strcmp((string)$a['time'], (string)$b['time']));
 $pending = array_values(array_filter($rows, fn($a) => !in_array($a['status'] ?? '', ['concluido', 'cancelado', 'faltou'], true)));
 $done = array_values(array_filter($rows, fn($a) => in_array($a['status'] ?? '', ['concluido', 'cancelado', 'faltou'], true)));
+$dayStats = barber_daily_stats((int)$user['id'], $date);
 
 if ($partial) {
     header('Content-Type: text/html; charset=utf-8');
@@ -120,9 +127,9 @@ if ($partial) {
 
 barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
 ?>
-<div class="bb-date">
+<section class="bb-day-toolbar" aria-label="Selecionar dia da agenda">
   <form method="get" action="<?= e(url('barbeiro/')) ?>">
-    <label>Dia
+    <label><span>Agenda do dia</span>
       <input type="date" name="date" value="<?= e($date) ?>" onchange="this.form.submit()">
     </label>
   </form>
@@ -132,17 +139,19 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
     <?php endif; ?>
     <button type="button" class="bb-link bb-refresh-btn" id="bb-refresh-now">Atualizar</button>
   </div>
-</div>
-<p class="bb-live-hint" id="bb-live-hint">Atualiza sozinho a cada 20s</p>
+</section>
+<p class="bb-live-hint bb-live-feedback" id="bb-live-hint"><span aria-hidden="true"></span> Atualização automática a cada 20s</p>
 
 <div id="bb-live" data-date="<?= e($date) ?>">
 <?php require __DIR__ . '/_hoje_body.php'; ?>
 </div>
 
-<div class="offcanvas offcanvas-bottom bb-sheet" tabindex="-1" id="finishSheet">
+<div class="offcanvas offcanvas-bottom bb-sheet" tabindex="-1" id="finishSheet" aria-labelledby="finishSheetTitle">
+  <div class="bb-sheet-handle" aria-hidden="true"></div>
   <div class="bb-sheet-head">
     <div>
-      <h2 class="bb-sheet-title">Concluir</h2>
+      <span class="bb-sheet-eyebrow">Revisão final</span>
+      <h2 class="bb-sheet-title" id="finishSheetTitle">Finalizar atendimento</h2>
       <div class="bb-sheet-sub" id="finishClient">—</div>
     </div>
     <button type="button" class="bb-sheet-close" data-bs-dismiss="offcanvas" aria-label="Fechar">×</button>
@@ -155,11 +164,14 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
       <input type="hidden" name="id" id="finishId" value="">
       <input type="hidden" name="base_price" id="finishBase" value="0">
 
-      <p class="bb-sheet-meta">Serviço: <strong id="finishService">—</strong></p>
-      <p class="bb-sheet-meta">Serviços: <strong class="bb-money" id="finishServiceTotal">R$ 0,00</strong></p>
+      <section class="bb-finish-summary" aria-label="Resumo do atendimento">
+        <span class="bb-finish-summary-icon"><?= icon_svg('scissors', 19) ?></span>
+        <div><span>Serviço realizado</span><strong id="finishService">—</strong></div>
+        <strong class="bb-money" id="finishServiceTotal">R$ 0,00</strong>
+      </section>
 
       <?php if ($sellableProducts): ?>
-        <h3 class="bb-sec" style="margin-top:8px">Cliente comprou?</h3>
+        <div class="bb-finish-section-head"><div><h3>Produtos vendidos</h3><p>Informe apenas o que o cliente levou.</p></div><span><?= count($sellableProducts) ?> opções</span></div>
         <div class="bb-finish-list">
           <?php foreach ($sellableProducts as $p): ?>
             <div class="bb-finish-row">
@@ -176,7 +188,9 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
                 value="0"
                 inputmode="numeric"
                 data-price="<?= (float)$p['price'] ?>"
+                aria-label="Quantidade de <?= e($p['name']) ?>"
               >
+              <output class="bb-finish-line-total"><?= e(money(0)) ?></output>
             </div>
           <?php endforeach; ?>
         </div>
@@ -184,11 +198,13 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
         <p class="bb-live-hint">Sem produtos à venda no estoque.</p>
       <?php endif; ?>
 
-      <div class="bb-finish-total">
-        <span>Total</span>
-        <strong class="bb-money" id="finishTotal">R$ 0,00</strong>
+      <div class="bb-finish-breakdown" aria-live="polite">
+        <div><span>Serviço</span><strong id="finishBreakdownService">R$ 0,00</strong></div>
+        <div><span>Produtos</span><strong id="finishProductsTotal">R$ 0,00</strong></div>
+        <div class="bb-finish-total"><span>Total a faturar</span><strong class="bb-money" id="finishTotal">R$ 0,00</strong></div>
       </div>
-      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit">Finalizar e faturar</button>
+      <p class="bb-finish-confirm-copy">Ao confirmar, o atendimento será concluído e lançado no faturamento.</p>
+      <button class="bb-btn bb-btn--ok bb-btn--block bb-finish-submit" type="submit">Confirmar finalização e faturar</button>
     </form>
   </div>
 </div>
@@ -197,6 +213,7 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
 (() => {
   const box = document.getElementById('bb-live');
   const hint = document.getElementById('bb-live-hint');
+  const headerStatus = document.getElementById('bb-update-status');
   const btn = document.getElementById('bb-refresh-now');
   const sheet = document.getElementById('finishSheet');
   const money = (n) => 'R$ ' + Number(n).toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+,)/g, '$1.');
@@ -207,10 +224,17 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
     document.querySelectorAll('.finish-qty').forEach((el) => {
       const q = parseInt(el.value || '0', 10) || 0;
       const p = parseFloat(el.getAttribute('data-price') || '0') || 0;
-      extra += q * p;
+      const lineTotal = q * p;
+      extra += lineTotal;
+      const output = el.closest('.bb-finish-row')?.querySelector('.bb-finish-line-total');
+      if (output) output.textContent = money(lineTotal);
     });
     const svc = document.getElementById('finishServiceTotal');
     if (svc) svc.textContent = money(base);
+    const breakdown = document.getElementById('finishBreakdownService');
+    if (breakdown) breakdown.textContent = money(base);
+    const productsTotal = document.getElementById('finishProductsTotal');
+    if (productsTotal) productsTotal.textContent = money(extra);
     document.getElementById('finishTotal').textContent = money(base + extra);
   }
 
@@ -233,6 +257,14 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
   const date = box.getAttribute('data-date') || '';
   const url = <?= json_encode(url('barbeiro/')) ?> + '?partial=1&date=' + encodeURIComponent(date);
   let busy = false;
+  function setUpdateStatus(message, state = 'ok') {
+    if (headerStatus) {
+      headerStatus.classList.toggle('is-busy', state === 'busy');
+      headerStatus.classList.toggle('is-error', state === 'error');
+      const label = headerStatus.querySelector('span');
+      if (label) label.textContent = message;
+    }
+  }
   async function tick(manual) {
     if (busy) return;
     if (document.hidden && !manual) return;
@@ -240,6 +272,7 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
     const ae = document.activeElement;
     if (!manual && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA')) return;
     busy = true;
+    setUpdateStatus('Atualizando', 'busy');
     try {
       const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
       if (res.redirected) { location.reload(); return; }
@@ -247,15 +280,29 @@ barber_shell_start($date === $today ? 'Hoje' : 'Agenda', 'hoje');
       if (html && html.indexOf('bb-kpis') !== -1) box.innerHTML = html;
       if (hint) {
         const n = new Date();
-        hint.textContent = 'Atualiza sozinho · ' + String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0') + ':' + String(n.getSeconds()).padStart(2,'0');
+        const stamp = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0') + ':' + String(n.getSeconds()).padStart(2,'0');
+        hint.innerHTML = '<span aria-hidden="true"></span> Atualizado às ' + stamp + ' · automático a cada 20s';
+        setUpdateStatus(stamp, 'ok');
       }
     } catch (e) {
       if (hint) hint.textContent = 'Falha ao atualizar';
+      setUpdateStatus('Sem conexão', 'error');
     } finally { busy = false; }
   }
   if (btn) btn.addEventListener('click', () => tick(true));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(false); });
   setInterval(() => tick(false), 20000);
+
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('form[data-bb-confirm]');
+    if (!form) return;
+    if (!window.confirm(form.getAttribute('data-bb-confirm') || 'Confirmar esta ação?')) event.preventDefault();
+  });
+
+  <?php if ($openId > 0): ?>
+  const openBtn = document.querySelector('.bb-btn--ok[data-id="<?= (int)$openId ?>"]');
+  if (openBtn) openBtn.click();
+  <?php endif; ?>
 })();
 </script>
 <?php barber_shell_end('hoje'); ?>

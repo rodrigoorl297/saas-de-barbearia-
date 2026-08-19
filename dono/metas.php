@@ -31,16 +31,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 admin_layout_start('Metas', 'dono', 'metas');
 ?>
-<div class="row g-3 mb-3">
-  <div class="col-12">
-    <p class="text-secondary mb-0">Acompanhe o faturamento do mês e ajuste as metas da loja e de cada barbeiro.</p>
-  </div>
-</div>
-<div class="row g-3">
+<header class="admin-page-header">
+  <div><span class="admin-eyebrow">Desempenho</span><h1>Metas do mês</h1><p>Acompanhe o faturamento e ajuste os objetivos da loja e de cada profissional.</p></div>
+</header>
+<div class="goal-grid">
   <?php if (!$goals): ?>
-    <div class="col-12">
-      <div class="card-soft p-4 text-center text-secondary">Nenhuma meta ainda. Cadastre barbeiros para gerar metas individuais.</div>
-    </div>
+    <div class="empty-state goal-empty"><strong>Nenhuma meta configurada</strong><p>Cadastre profissionais para gerar metas individuais e acompanhar o desempenho.</p><a class="btn btn-accent" href="<?= e(url('dono/barbeiros.php')) ?>">Cadastrar profissional</a></div>
   <?php endif; ?>
   <?php foreach ($goals as $g):
       $isLoja = ($g['type'] ?? '') === 'loja' || empty($g['barber_id']);
@@ -49,24 +45,21 @@ admin_layout_start('Metas', 'dono', 'metas');
       $target = (float)$g['target'];
       $pct = $target > 0 ? min(100, ($atual / $target) * 100) : 0;
   ?>
-  <div class="col-md-6">
-    <div class="card-soft p-3">
-      <div class="d-flex justify-content-between mb-2">
-        <strong><?= e($nome) ?></strong>
-        <span class="text-secondary"><?= e($month) ?></span>
-      </div>
-      <div class="mb-1"><?= e(money($atual)) ?> / <?= e(money($target)) ?></div>
-      <div class="progress mb-3" style="height:8px;background:rgba(255,255,255,.08)">
-        <div class="progress-bar" style="width:<?= number_format($pct, 1) ?>%;background:#c9a227"></div>
-      </div>
-      <form method="post" class="d-flex gap-2">
+  <article class="goal-card">
+      <div class="goal-card-header"><div><span><?= $isLoja ? 'Negócio' : 'Profissional' ?></span><h2><?= e($nome) ?></h2></div><span class="goal-period"><?= e(date('m/Y')) ?></span></div>
+      <div class="goal-values"><div><span>Realizado</span><strong><?= e(money($atual)) ?></strong></div><div><span>Objetivo</span><strong><?= e(money($target)) ?></strong></div></div>
+      <svg class="goal-chart" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="<?= number_format($pct, 0) ?>% da meta atingida">
+        <rect class="chart-track" x="0" y="0" width="100" height="10" rx="5"/>
+        <rect class="chart-fill" x="0" y="0" width="<?= number_format($pct, 1, '.', '') ?>" height="10" rx="5"/>
+      </svg>
+      <div class="goal-progress-copy"><strong><?= number_format($pct, 0) ?>%</strong><span><?= $pct >= 100 ? 'Meta alcançada' : 'do objetivo mensal' ?></span></div>
+      <form method="post" class="goal-form">
         <?= csrf_field() ?>
         <input type="hidden" name="id" value="<?= (int)$g['id'] ?>">
-        <input type="number" step="0.01" name="target" class="form-control form-control-sm" value="<?= e((string)$target) ?>">
+        <label><span>Atualizar objetivo</span><input type="number" step="0.01" name="target" class="form-control form-control-sm" value="<?= e((string)$target) ?>"></label>
         <button class="btn btn-sm btn-accent" type="submit">Salvar</button>
       </form>
-    </div>
-  </div>
+  </article>
   <?php endforeach; ?>
 </div>
 <?php admin_layout_end(); ?>

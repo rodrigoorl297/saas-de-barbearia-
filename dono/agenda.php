@@ -57,14 +57,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'service_ids'  => [],
             'date'         => $today,
             'time'         => $time,
-            'status'       => 'confirmado',
+            'status'       => 'em_andamento',
             'notes'        => 'Atendimento na hora',
             'price'        => 0,
             'products'     => [],
         ]);
 
-        flash('success', 'Cliente adicionado às ' . $time . '. Agora marque os serviços e finalize.');
-        redirect($agendaUrl($today, 'agenda') . '&open=' . (int)$new['id']);
+        flash('success', 'Atendimento iniciado às ' . $time . ' e marcado como Em andamento.');
+        redirect($agendaUrl($today, 'agenda'));
     }
 
     $all = store_read('appointments');
@@ -176,11 +176,14 @@ unset($col);
 $total = count($rows);
 $pendentes = count($activeRows);
 $concluidos = count(array_filter($rows, fn($a) => $a['status'] === 'concluido'));
+$emAndamento = count(array_filter($rows, fn($a) => ($a['status'] ?? '') === 'em_andamento'));
 $faturado = array_sum(array_map(fn($a) => $a['status'] === 'concluido' ? (float)$a['price'] : 0, $rows));
+$barberStats = barbers_daily_stats($date);
 
 $statusColors = [
     'agendado'   => '#6366f1',
     'confirmado' => '#10b981',
+    'em_andamento' => '#f59e0b',
     'concluido'  => '#22c55e',
     'cancelado'  => '#ef4444',
     'faltou'     => '#f59e0b',
@@ -188,6 +191,7 @@ $statusColors = [
 $statusLabels = [
     'agendado'   => 'Agendado',
     'confirmado' => 'Confirmado',
+    'em_andamento' => 'Em andamento',
     'concluido'  => 'Concluído',
     'cancelado'  => 'Cancelado',
     'faltou'     => 'Faltou',
@@ -217,6 +221,10 @@ admin_layout_start('Agenda', 'dono', 'agenda');
     </button>
   <?php endif; ?>
   <div class="agenda-stats">
+    <div class="agenda-stat">
+      <span class="agenda-stat-val"><?= $emAndamento ?></span>
+      <span class="agenda-stat-lbl">Em andamento</span>
+    </div>
     <div class="agenda-stat">
       <span class="agenda-stat-val"><?= $pendentes ?></span>
       <span class="agenda-stat-lbl">Na fila</span>
@@ -258,6 +266,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
       $b = $col['barber'];
       $cards = $col['cards'];
       $photo = media_url($b['avatar'] ?? '');
+      $stats = $barberStats[(int)$b['id']] ?? ['cuts' => 0, 'total' => 0.0];
     ?>
     <div class="agenda-col">
       <div class="agenda-col-header">
@@ -270,7 +279,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
         </div>
         <div class="agenda-col-info">
           <strong><?= e($b['name']) ?></strong>
-          <span><?= count($cards) ?> na fila</span>
+          <span><?= count($cards) ?> na fila · <?= (int)$stats['cuts'] ?> cortes · <?= e(money((float)$stats['total'])) ?></span>
         </div>
         <div class="agenda-col-badge"><?= count($cards) ?></div>
       </div>
@@ -313,7 +322,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
                 data-apt-client="<?= e($a['client_name']) ?>"
                 data-apt-services="<?= e(implode(',', $sidList)) ?>"
                 data-apt-done="0"
-              >+ Serviços e finalizar</button>
+              ><?= ($a['status'] ?? '') === 'em_andamento' ? 'Finalizar corte' : '+ Serviços e finalizar' ?></button>
             <?php endif; ?>
 
             <div class="agenda-card-actions">
@@ -423,7 +432,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-secondary mb-3">Cliente chegou sem hora marcada? Cadastre aqui e finalize com os serviços na sequência.</p>
+        <p class="small text-secondary mb-3">Cliente chegou sem hora marcada? Inicie o atendimento agora e finalize quando o corte terminar.</p>
         <form method="post" class="vstack gap-3" id="walkinForm">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="walkin">
@@ -457,7 +466,7 @@ admin_layout_start('Agenda', 'dono', 'agenda');
           </div>
           <div class="d-flex flex-wrap gap-2 justify-content-end">
             <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-accent" type="submit">Adicionar e escolher serviços</button>
+            <button class="btn btn-accent" type="submit">Iniciar atendimento</button>
           </div>
         </form>
       </div>

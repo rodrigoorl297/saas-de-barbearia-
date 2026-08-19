@@ -57,7 +57,7 @@ admin_layout_start('Financeiro (DRE)', 'dono', 'financeiro');
     </div>
     <div class="d-flex gap-2 align-items-center">
       <form method="get" class="d-flex m-0">
-        <select name="m" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width: 150px;">
+        <select name="m" class="form-select form-select-sm me-2 admin-filter-select" onchange="this.form.submit()" aria-label="Filtrar por mês">
           <?php foreach ($monthsAvailable as $m): 
             $mLabel = date('M Y', strtotime($m . '-01'));
           ?>
@@ -72,15 +72,15 @@ admin_layout_start('Financeiro (DRE)', 'dono', 'financeiro');
   <div class="stock-kpis">
     <div class="stock-kpi">
       <span class="stock-kpi-label">Receita Bruta</span>
-      <strong class="stock-kpi-value" style="color:#16a34a"><?= e(money($entradas)) ?></strong>
+      <strong class="stock-kpi-value is-positive"><?= e(money($entradas)) ?></strong>
     </div>
     <div class="stock-kpi">
       <span class="stock-kpi-label">Despesas</span>
-      <strong class="stock-kpi-value" style="color:#dc2626"><?= e(money($saidas)) ?></strong>
+      <strong class="stock-kpi-value is-negative"><?= e(money($saidas)) ?></strong>
     </div>
     <div class="stock-kpi">
       <span class="stock-kpi-label">Lucro Líquido</span>
-      <strong class="stock-kpi-value" style="color:<?= $saldo >= 0 ? '#16a34a' : '#dc2626' ?>"><?= e(money($saldo)) ?></strong>
+      <strong class="stock-kpi-value <?= $saldo >= 0 ? 'is-positive' : 'is-negative' ?>"><?= e(money($saldo)) ?></strong>
     </div>
   </div>
 
@@ -118,7 +118,7 @@ admin_layout_start('Financeiro (DRE)', 'dono', 'financeiro');
           </tr>
         <?php endforeach; ?>
         <?php if (!$displayEntries): ?>
-          <tr><td colspan="4" class="text-secondary text-center py-4">Nenhum lançamento neste mês.</td></tr>
+          <tr><td colspan="4"><div class="empty-state table-empty"><strong>Nenhum lançamento neste mês</strong><p>Registre receitas e despesas para acompanhar o resultado real da barbearia.</p><button type="button" class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#cashModal">Criar lançamento</button></div></td></tr>
         <?php endif; ?>
         </tbody>
       </table>

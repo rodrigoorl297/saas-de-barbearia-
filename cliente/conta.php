@@ -79,29 +79,38 @@ client_shell_start('conta');
 
   <?php if (!$client): ?>
     <div class="conta-login-box">
-      <div class="conta-avatar"><?= icon_svg('user', 22) ?></div>
-      <h1 class="page-title" style="margin:0">Sua conta</h1>
-      <p class="page-sub">Entre para ver planos, cartões e cobranças.</p>
-      <a class="btn-confirmar" href="<?= e(url('cliente/agendamentos.php?step=telefone')) ?>">Entrar</a>
+      <span class="conta-login-icon"><?= icon_svg('user', 24) ?></span>
+      <span class="client-eyebrow">Área do cliente</span>
+      <h1>Sua conta, em um só lugar</h1>
+      <p>Entre para acompanhar planos, pagamentos, pontos e benefícios.</p>
+      <a class="btn-confirmar" href="<?= e(url('cliente/agendamentos.php?step=telefone')) ?>">Entrar na conta</a>
     </div>
   <?php else: ?>
+    <header class="client-page-intro client-page-intro--account">
+      <span class="client-eyebrow">Área do cliente</span>
+      <h1>Sua conta</h1>
+      <p>Gerencie seus dados, planos e benefícios.</p>
+    </header>
     <div class="conta-profile-card">
       <div class="conta-avatar"><?= icon_svg('user', 22) ?></div>
       <div class="conta-profile-text">
-        <strong>Olá <?= e($client['name'] ?: 'Cliente') ?>!</strong>
+        <strong><?= e($client['name'] ?: 'Cliente') ?></strong>
+        <span><?= e($client['phone'] ?? 'Cliente cadastrado') ?></span>
       </div>
-      <button type="button" class="conta-edit-btn" onclick="document.getElementById('rename-modal').showModal()" aria-label="Editar"><?= icon_svg('edit', 18) ?></button>
+      <button type="button" class="conta-edit-btn" onclick="document.getElementById('rename-modal').showModal()" aria-label="Editar perfil" aria-haspopup="dialog" aria-controls="rename-modal"><?= icon_svg('edit', 18) ?></button>
     </div>
     <div class="conta-logout-wrap">
       <a class="voltar-link" href="?sair=1">Sair da conta</a>
     </div>
 
-    <dialog id="rename-modal" class="conta-dialog">
+    <dialog id="rename-modal" class="conta-dialog" aria-labelledby="rename-modal-title">
       <form method="post" class="conta-dialog-form">
         <input type="hidden" name="action" value="rename">
-        <h3>Editar perfil</h3>
-        <input class="input-telefone" name="name" required value="<?= e($client['name'] ?? '') ?>" placeholder="Nome">
-        <input class="input-telefone" type="email" name="email" value="<?= e($client['email'] ?? '') ?>" placeholder="E-mail (para cobrança)">
+        <h3 id="rename-modal-title">Editar perfil</h3>
+        <label class="modal-label" for="rename-name">Nome</label>
+        <input class="input-telefone" id="rename-name" name="name" required autocomplete="name" value="<?= e($client['name'] ?? '') ?>" placeholder="Nome">
+        <label class="modal-label" for="rename-email">E-mail para cobrança</label>
+        <input class="input-telefone" id="rename-email" type="email" name="email" autocomplete="email" value="<?= e($client['email'] ?? '') ?>" placeholder="E-mail (para cobrança)">
         <div class="conta-dialog-actions">
           <button type="button" class="btn-ghost-as" onclick="this.closest('dialog').close()">Cancelar</button>
           <button type="submit" class="btn-confirmar" style="margin:0;width:auto;padding:10px 18px">Salvar</button>
@@ -109,10 +118,14 @@ client_shell_start('conta');
       </form>
     </dialog>
 
-    <h2 class="conta-section-title">Seus planos e pacotes:</h2>
+    <h2 class="conta-section-title">Seus planos e pacotes</h2>
 
     <?php if (!$subs): ?>
-      <p class="page-sub" style="text-align:center;margin-bottom:18px">Você ainda não tem planos ativos.</p>
+      <div class="account-empty-state">
+        <span><?= icon_svg('card', 22) ?></span>
+        <div><strong>Nenhum plano ativo</strong><p>Conheça as opções disponíveis e economize nos próximos atendimentos.</p></div>
+        <a href="#planos-disponiveis">Ver planos</a>
+      </div>
     <?php else: ?>
       <div class="plan-mine-track">
         <?php foreach ($subs as $sub):
@@ -123,17 +136,18 @@ client_shell_start('conta');
                 ? (string)$plan['usage_limit']
                 : '∞';
             $renews = !empty($sub['renews_at']) ? date('d/m/Y', strtotime((string)$sub['renews_at'])) : '—';
+            $usagePct = is_numeric($limit) && (int)$limit > 0 ? min(100, round(($used / (int)$limit) * 100)) : 0;
         ?>
-          <div class="plan-mine-card">
+          <article class="plan-mine-card">
             <div class="plan-mine-name"><?= e($plan['name']) ?></div>
             <div class="plan-usage-row">
               <span><?= e($plan['benefit_label'] ?? 'Benefício') ?></span>
-              <div class="plan-usage-bar"><i></i></div>
               <span><?= $used ?> de <?= e($limit) ?></span>
             </div>
+            <svg class="client-plan-progress" viewBox="0 0 100 6" preserveAspectRatio="none" role="img" aria-label="<?= $usagePct ?>% do plano utilizado"><rect class="client-progress-track" x="0" y="0" width="100" height="6" rx="3"/><rect class="client-progress-fill" x="0" y="0" width="<?= $usagePct ?>" height="6" rx="3"/></svg>
             <a class="btn-agendar-plano" href="<?= e(url('cliente/agendar-plano.php?plan_id=' . (int)$plan['id'])) ?>">Agendar</a>
             <div class="plan-renew">Será renovado em <?= e($renews) ?></div>
-          </div>
+          </article>
         <?php endforeach; ?>
       </div>
     <?php endif; ?>
@@ -180,10 +194,10 @@ client_shell_start('conta');
           <?php endif; ?>
 
           <?php if ($mpReady): ?>
-            <button type="button" class="btn-confirmar" id="btn-open-add-card">Adicionar cartão</button>
-            <dialog id="add-card-modal" class="conta-dialog conta-dialog-wide">
+            <button type="button" class="btn-confirmar" id="btn-open-add-card" aria-haspopup="dialog" aria-controls="add-card-modal">Adicionar cartão</button>
+            <dialog id="add-card-modal" class="conta-dialog conta-dialog-wide" aria-labelledby="add-card-title">
               <div class="conta-dialog-form">
-                <h3>Cadastrar cartão</h3>
+                <h3 id="add-card-title">Cadastrar cartão</h3>
                 <p class="page-sub" style="margin:0">Dados enviados direto ao Mercado Pago (PCI). Não armazenamos o número completo.</p>
                 <form id="form-checkout">
                   <div class="mp-field">
@@ -339,10 +353,14 @@ client_shell_start('conta');
     </div>
   <?php endif; ?>
 
-  <h2 class="conta-section-title" style="margin-top:28px">Confira os planos e pacotes abaixo:</h2>
+  <header class="account-plans-heading" id="planos-disponiveis">
+    <span class="client-eyebrow">Planos e pacotes</span>
+    <h2>Cuide do visual com mais vantagens</h2>
+    <p>Escolha a opção que combina com sua rotina.</p>
+  </header>
 
   <?php if (!$plans): ?>
-    <p class="page-sub" style="text-align:center">Nenhum plano disponível no momento.</p>
+    <div class="client-empty-state client-empty-state--compact"><span class="client-empty-icon"><?= icon_svg('card', 22) ?></span><strong>Nenhum plano disponível</strong><p>Novas opções aparecerão aqui assim que forem publicadas.</p></div>
   <?php else: ?>
     <div class="plan-catalog-wrap">
       <button type="button" class="plan-nav plan-nav-prev" aria-label="Plano anterior">‹</button>
@@ -372,7 +390,7 @@ client_shell_start('conta');
                     <?php if (!empty($imgs[$i])): ?>
                       <img src="<?= e(media_url($imgs[$i])) ?>" alt="">
                     <?php else: ?>
-                      <?= icon_svg('camera', 26) ?>
+                      <span class="plan-visual-fallback" aria-hidden="true"><?= icon_svg('scissors', 26) ?><b><?= e(initials($p['name'])) ?></b></span>
                     <?php endif; ?>
                   </div>
                 <?php endfor; ?>
@@ -384,7 +402,7 @@ client_shell_start('conta');
                 <p class="plan-desc"><?= e($p['description']) ?></p>
               <?php endif; ?>
               <?php if ($client): ?>
-                <button class="btn-assinar js-assinar"
+                <button class="btn-assinar js-assinar" aria-haspopup="dialog" aria-controls="pay-plan-modal"
                         type="button"
                         data-plan-id="<?= (int)$p['id'] ?>"
                         data-plan-name="<?= e($p['name']) ?>"
@@ -403,7 +421,7 @@ client_shell_start('conta');
   <?php endif; ?>
 
   <?php if ($client): ?>
-    <dialog id="pay-plan-modal" class="conta-dialog">
+    <dialog id="pay-plan-modal" class="conta-dialog" aria-labelledby="pay-plan-title">
       <div class="conta-dialog-form">
         <h3 id="pay-plan-title">Assinar plano</h3>
         <p class="page-sub" id="pay-plan-sub" style="margin:0"></p>

@@ -88,12 +88,12 @@ admin_layout_start('Configurações', 'dono', 'config');
           <div class="form-text">Esse nome vira o link público do app (slug).</div>
         </div>
         <div>
-          <label class="form-label">Link do app do cliente</label>
+          <label class="form-label" for="client-app-link">Link do app do cliente</label>
           <div class="input-group">
-            <input type="text" class="form-control" id="client-app-link" readonly value="<?= e(client_app_absolute_url()) ?>">
+            <input type="text" class="form-control" id="client-app-link" readonly aria-describedby="client-app-link-help" value="<?= e(client_app_absolute_url()) ?>">
             <button type="button" class="btn btn-outline-secondary" id="copy-client-link">Copiar</button>
           </div>
-          <div class="form-text">Compartilhe este link com os clientes. Ele muda automaticamente quando você altera o nome.</div>
+          <div class="form-text" id="client-app-link-help">Compartilhe este link com os clientes. Ele muda automaticamente quando você altera o nome.</div>
         </div>
 
         <hr class="border-secondary opacity-25">

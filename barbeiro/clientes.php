@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($wantNow && $serviceId < 1) {
-            flash('danger', 'Para registrar corte, escolha o serviço.');
+            flash('danger', 'Para registrar o corte, escolha o serviço.');
             redirect(url('barbeiro/clientes.php' . ($id > 0 ? '?edit=' . $id : '')));
         }
 
@@ -56,26 +56,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($wantNow) {
                 $nowTime = date('H:i');
-                $appointment = [
+                $new = save_appointment([
                     'client_id' => (int)$client['id'],
                     'client_name' => $client['name'],
                     'client_phone' => $client['phone'],
                     'barber_id' => $barberId,
                     'service_id' => $serviceId,
+                    'service_ids' => [$serviceId],
                     'date' => $today,
                     'time' => $nowTime,
-                    'status' => 'concluido',
-                    'price' => (float)($svc['price'] ?? 0)
-                ];
-                save_appointment($appointment);
-                
-                $all = store_read('appointments');
-                $savedAppt = end($all);
-                
-                sync_appointment_cash($savedAppt, $user['id'] ?? 1);
-                sync_appointment_loyalty($savedAppt);
-                
-                $msg .= ' Corte registrado agora: ' . ($svc['name'] ?? '') . '.';
+                    'status' => 'em_andamento',
+                    'notes' => 'Walk-in',
+                    'price' => (float)($svc['price'] ?? 0),
+                    'products' => [],
+                ]);
+                flash('success', $msg . ' Atendimento iniciado e marcado como Em andamento.');
+                redirect(url('barbeiro/?date=' . urlencode($today)));
             } else {
                 $booked = book_service_for_client((int)$client['id'], $barberId, $serviceId, $date, $time);
                 if (is_string($booked)) {
@@ -173,10 +169,10 @@ barber_shell_start('Clientes', 'clientes');
   </div>
 <?php endif; ?>
 
-<div class="offcanvas offcanvas-bottom bb-sheet" tabindex="-1" id="clientSheet">
+<div class="offcanvas offcanvas-bottom bb-sheet" tabindex="-1" id="clientSheet" aria-labelledby="clientSheetTitle">
   <div class="bb-sheet-head">
     <div>
-      <h2 class="bb-sheet-title"><?= $edit ? 'Editar cliente' : 'Novo cliente' ?></h2>
+      <h2 class="bb-sheet-title" id="clientSheetTitle"><?= $edit ? 'Editar cliente' : 'Novo cliente' ?></h2>
       <div class="bb-sheet-sub">Dados + serviço com você</div>
     </div>
     <button type="button" class="bb-sheet-close" data-bs-dismiss="offcanvas" aria-label="Fechar">×</button>
@@ -199,17 +195,14 @@ barber_shell_start('Clientes', 'clientes');
         <input type="date" name="birth_date" value="<?= e($edit['birth_date'] ?? '') ?>">
       </label>
 
-      <label class="bb-check mb-2" style="margin-bottom:8px">
-        <input type="radio" name="booking_type" value="book" id="alsoBook" class="action-radio">
-        <span>Agendar horário no futuro</span>
-      </label>
-      
-      <label class="bb-check mb-3" style="margin-bottom:16px;color:#4ade80">
-        <input type="radio" name="booking_type" value="now" id="cutNow" class="action-radio">
-        <span>Registrar corte de agora (Walk-in)</span>
-        <input type="hidden" name="also_book" id="alsoBookHidden" value="0">
-        <input type="hidden" name="cut_now" id="cutNowHidden" value="0">
-      </label>
+      <div class="bb-tabs" role="tablist">
+        <button type="button" class="bb-tab active" data-tab="save" role="tab">Cadastro</button>
+        <button type="button" class="bb-tab" data-tab="book" role="tab">Agendar</button>
+        <button type="button" class="bb-tab" data-tab="now" role="tab">Iniciar corte</button>
+      </div>
+      <input type="hidden" name="also_book" id="alsoBookHidden" value="0">
+      <input type="hidden" name="cut_now" id="cutNowHidden" value="0">
+      <p class="bb-tab-hint" id="tabHint">Salva só os dados do cliente.</p>
 
       <div id="bookFields" class="bb-book-hidden">
         <label>
@@ -249,7 +242,7 @@ barber_shell_start('Clientes', 'clientes');
       <?php if (!$edit): ?>
         <p class="bb-live-hint">Senha inicial do app do cliente = telefone.</p>
       <?php endif; ?>
-      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit"><?= $edit ? 'Salvar' : 'Cadastrar cliente' ?></button>
+      <button class="bb-btn bb-btn--ok bb-btn--block" type="submit" id="submitBtn"><?= $edit ? 'Salvar' : 'Cadastrar cliente' ?></button>
       <?php if ($edit): ?>
         <a class="bb-btn bb-btn--ghost bb-btn--block" style="text-align:center;text-decoration:none" href="<?= e(url('barbeiro/clientes.php')) ?>">Cancelar</a>
       <?php endif; ?>
@@ -259,15 +252,39 @@ barber_shell_start('Clientes', 'clientes');
 
 <style>
 .bb-book-hidden { display: none !important; }
-.bb-check {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center;
-  gap: 10px;
-  color: #e8eaf0;
-  font-size: .95rem;
+.bb-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 14px 0 8px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
 }
-.bb-check input { width: 20px; height: 20px; accent-color: #c9a227; }
+.bb-tab {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #9aa3b5;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 600;
+  padding: .65rem .35rem;
+  cursor: pointer;
+}
+.bb-tab.active {
+  background: #1a1f2b;
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(255,255,255,.06);
+}
+.bb-tab[data-tab="now"].active { color: #4ade80; }
+.bb-tab-hint {
+  margin: 0 0 12px;
+  color: #9aa3b5;
+  font-size: .82rem;
+  line-height: 1.4;
+}
 .bb-form select {
   width: 100%;
   box-sizing: border-box;
@@ -283,38 +300,58 @@ barber_shell_start('Clientes', 'clientes');
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const sheet = document.getElementById('clientSheet');
-  const also = document.getElementById('alsoBook');
-  const cutNow = document.getElementById('cutNow');
+  const tabs = document.querySelectorAll('.bb-tab');
   const alsoBookHidden = document.getElementById('alsoBookHidden');
   const cutNowHidden = document.getElementById('cutNowHidden');
   const book = document.getElementById('bookFields');
   const svc = document.getElementById('bookService');
   const date = document.getElementById('bookDate');
   const time = document.getElementById('bookTime');
+  const tabHint = document.getElementById('tabHint');
+  const submitBtn = document.getElementById('submitBtn');
   const slotsUrl = <?= json_encode(url('api/slots.php')) ?>;
   const barberId = <?= (int)$barberId ?>;
+  let activeTab = 'save';
+
+  const hints = {
+    save: 'Salva só os dados do cliente.',
+    book: 'Escolha serviço, data e horário para agendar.',
+    now: 'Inicia o atendimento como Em andamento. Quando terminar, toque em Finalizar corte.',
+  };
+  const submitLabels = {
+    save: <?= json_encode($edit ? 'Salvar' : 'Cadastrar cliente') ?>,
+    book: <?= json_encode($edit ? 'Salvar e agendar' : 'Cadastrar e agendar') ?>,
+    now: 'Iniciar atendimento',
+  };
+
+  function setTab(tab) {
+    activeTab = tab;
+    tabs.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
+    if (alsoBookHidden) alsoBookHidden.value = tab === 'book' ? '1' : '0';
+    if (cutNowHidden) cutNowHidden.value = tab === 'now' ? '1' : '0';
+    if (tabHint) tabHint.textContent = hints[tab] || hints.save;
+    if (submitBtn) submitBtn.textContent = submitLabels[tab] || submitLabels.save;
+    toggleBook();
+  }
 
   function toggleBook() {
     if (!book) return;
-    const isBook = !!(also && also.checked);
-    const isNow = !!(cutNow && cutNow.checked);
+    const isBook = activeTab === 'book';
+    const isNow = activeTab === 'now';
     const on = isBook || isNow;
-    
-    if (alsoBookHidden) alsoBookHidden.value = isBook ? '1' : '0';
-    if (cutNowHidden) cutNowHidden.value = isNow ? '1' : '0';
 
     book.classList.toggle('bb-book-hidden', !on);
-    
+
     if (date && time) {
         date.closest('label').style.display = isNow ? 'none' : 'block';
         time.closest('label').style.display = isNow ? 'none' : 'block';
     }
-    
+
     if (svc) {
         if (on) svc.setAttribute('required', 'required');
         else svc.removeAttribute('required');
     }
-    
+
     [date, time].forEach((el) => {
       if (!el) return;
       if (isBook) el.setAttribute('required', 'required');
@@ -350,11 +387,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  document.querySelectorAll('.action-radio').forEach(r => r.addEventListener('change', toggleBook));
+  tabs.forEach((btn) => btn.addEventListener('click', () => setTab(btn.dataset.tab || 'save')));
   [svc, date].forEach((el) => el && el.addEventListener('change', () => {
-      if (also && also.checked) loadSlots();
+      if (activeTab === 'book') loadSlots();
   }));
-  toggleBook();
+  setTab('save');
 
   <?php if ($edit || isset($_GET['new'])): ?>
   if (sheet && window.bootstrap) bootstrap.Offcanvas.getOrCreateInstance(sheet).show();

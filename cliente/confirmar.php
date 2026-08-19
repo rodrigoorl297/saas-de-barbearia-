@@ -147,27 +147,42 @@ $backUrl = !empty($booking['from_plan'])
     : url('cliente/profissional.php?date=' . urlencode($booking['date']) . '&barber_id=' . (int)$booking['barber_id']);
 ?>
 <div class="page-inner">
-  <a class="voltar-link" href="<?= e($backUrl) ?>">← Voltar</a>
-  <h1 class="page-title">Confirmar agendamento</h1>
+  <?php client_booking_stepper(4); ?>
+  <a class="voltar-link" href="<?= e($backUrl) ?>"><?= icon_svg('back', 16) ?> Voltar e editar</a>
+  <header class="client-page-intro client-page-intro--compact">
+    <span class="client-eyebrow">Última etapa</span>
+    <h1>Revise seu agendamento</h1>
+    <p>Confira os detalhes antes de finalizar.</p>
+  </header>
 
-  <div class="resumo-card">
-    <div class="linha"><span>Serviço</span><strong><?= e(implode(', ', array_column($services, 'name'))) ?></strong></div>
+  <section class="resumo-card confirmation-summary" aria-label="Resumo completo do agendamento">
+    <div class="confirmation-services">
+      <span class="confirmation-label">Serviços</span>
+      <?php foreach ($services as $service): ?>
+        <div class="confirmation-service-row">
+          <span class="confirmation-service-icon" aria-hidden="true"><?= icon_svg('scissors', 17) ?></span>
+          <span><strong><?= e($service['name']) ?></strong><small><?= (int)$service['duration_min'] ?> min</small></span>
+          <strong><?= !empty($booking['from_plan']) && (int)$service['id'] === $planServiceId ? 'Incluso' : e(money((float)$service['price'])) ?></strong>
+        </div>
+      <?php endforeach; ?>
+    </div>
     <?php if (!empty($booking['from_plan'])): ?>
       <div class="linha"><span>Plano</span><strong>Incluso / extras à parte</strong></div>
     <?php endif; ?>
-    <div class="linha"><span>Profissional</span><strong><?= e($barber['name'] ?? '') ?></strong></div>
-    <div class="linha"><span>Data</span><strong><?= e(date('d/m/Y', strtotime($booking['date']))) ?></strong></div>
-    <div class="linha"><span>Horário</span><strong><?= e($booking['time']) ?></strong></div>
-    <div class="total"><?= e(money($total)) ?></div>
-  </div>
+    <div class="confirmation-details-grid">
+      <div><span><?= icon_svg('user', 17) ?> Profissional</span><strong><?= e($barber['name'] ?? '') ?></strong></div>
+      <div><span><?= icon_svg('calendar', 17) ?> Data e horário</span><strong><?= e(date('d/m/Y', strtotime($booking['date']))) ?> às <?= e($booking['time']) ?></strong></div>
+    </div>
+    <div class="confirmation-total"><span>Total</span><strong><?= e(money($total)) ?></strong></div>
+  </section>
 
-  <?php if ($error): ?><div class="alert-as danger"><?= e($error) ?></div><?php endif; ?>
+  <?php if ($error): ?><div class="alert-as danger" role="alert"><?= e($error) ?></div><?php endif; ?>
 
-  <form method="post">
+  <form method="post" class="confirmation-form">
     <input type="hidden" name="confirm" value="1">
     <?php if ($loggedClient): ?>
       <p class="page-sub">Confirmando como <strong><?= e($loggedClient['name']) ?></strong></p>
-      <button class="btn-confirmar" type="submit">Confirmar agendamento</button>
+      <button class="btn-confirmar" type="submit"><span>Confirmar agendamento</span><small><?= e($booking['time']) ?> · <?= e(money($total)) ?></small></button>
     <?php else: ?>
       <div class="nome-cliente">
         <label>Seu nome</label>
@@ -183,9 +198,9 @@ $backUrl = !empty($booking['from_plan'])
           <input class="input-telefone" type="password" name="client_password" id="client_password" required inputmode="numeric" pattern="[0-9]{4,}" placeholder="Digite apenas números" value="<?= e($_POST['client_password'] ?? '') ?>">
           <button type="button" class="eye-btn" id="toggle-senha" aria-label="Mostrar senha"><?= icon_svg('eye', 16) ?></button>
         </div>
-        <small style="opacity:.7;font-size:12px">Use essa senha depois em “Ver mais” no histórico.</small>
+        <small class="form-help">Use essa senha depois em “Ver mais” no histórico.</small>
       </div>
-      <button class="btn-confirmar" type="submit">Confirmar agendamento</button>
+      <button class="btn-confirmar" type="submit"><span>Confirmar agendamento</span><small><?= e($booking['time']) ?> · <?= e(money($total)) ?></small></button>
     <?php endif; ?>
   </form>
 </div>
